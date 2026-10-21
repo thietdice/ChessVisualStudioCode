@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { Chess } from "chess.js";
 import { Color, findKing, parseFen, pieceAt } from "./board";
 import { FILE_URI, MatrixFileSystem, SCHEME } from "./fs";
 import { ErrorMsg, Session, StateMsg } from "./net";
@@ -62,6 +63,9 @@ class Controller implements vscode.Disposable {
     border: "1px solid",
     borderColor: new vscode.ThemeColor("editorCursor.foreground"),
   });
+  private readonly targetDeco = vscode.window.createTextEditorDecorationType({
+    backgroundColor: new vscode.ThemeColor("editor.findMatchHighlightBackground"),
+  });
   private readonly blameDeco = vscode.window.createTextEditorDecorationType({
     after: { color: new vscode.ThemeColor("editorCodeLens.foreground"), fontStyle: "italic", margin: "0 0 0 3em" },
   });
@@ -75,6 +79,7 @@ class Controller implements vscode.Disposable {
       this.diagnostics,
       this.lastMoveDeco,
       this.selectedDeco,
+      this.targetDeco,
       this.blameDeco,
       vscode.window.onDidChangeVisibleTextEditors(() => this.decorate()),
       vscode.workspace.onDidChangeTextDocument((e) => {
@@ -381,6 +386,7 @@ class Controller implements vscode.Disposable {
     };
     const lastRanges = show && last ? [cell(last.slice(0, 2)), cell(last.slice(2, 4))] : [];
     const selRanges = show && this.selected ? [cell(this.selected)] : [];
+    const targetRanges = show && this.selected ? legalTargets(s.fen, this.selected).map(cell) : [];
     const blame: vscode.DecorationOptions[] = [];
     if (show && last) {
       const line = layout.squarePos(last.slice(2, 4)).line;
@@ -397,8 +403,19 @@ class Controller implements vscode.Disposable {
     for (const e of editors) {
       e.setDecorations(this.lastMoveDeco, lastRanges);
       e.setDecorations(this.selectedDeco, selRanges);
+      e.setDecorations(this.targetDeco, targetRanges);
       e.setDecorations(this.blameDeco, blame);
     }
+  }
+}
+
+/** Destination squares of the legal moves from `square`; empty when it is not that piece's turn. */
+function legalTargets(fen: string, square: string): string[] {
+  try {
+    const moves = new Chess(fen).moves({ square: square as any, verbose: true });
+    return [...new Set(moves.map((m) => m.to as string))];
+  } catch {
+    return [];
   }
 }
 

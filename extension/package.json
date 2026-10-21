@@ -93,6 +93,7 @@
     "package": "vsce package --allow-missing-repository --skip-license"
   },
   "dependencies": {
+    "chess.js": "^1.4.0",
     "ws": "^8.22.0"
   },
   "devDependencies": {
