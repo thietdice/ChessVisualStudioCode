@@ -1,11 +1,13 @@
 import { Color, FILES, Grid, PieceType, squareIndex } from "./board";
 
-const NAME: Record<PieceType, string> = { p: "Pawn", n: "Knight", b: "Bishop", r: "Rook", q: "Queen", k: "King" };
+// Vietnamese piece names; prefix t = Trắng (White), d = Đen (Black).
+const NAME: Record<PieceType, string> = { p: "Tot", n: "Ma", b: "Tuong", r: "Xe", q: "Hau", k: "Vua" };
+const SIDE: Record<Color, string> = { w: "t", b: "d" };
 const EMPTY = "__";
 
 const INDENT = "        ";
 const ROW_INDENT = "            ";
-// Visible board: "wKnight, " per cell, with a blank line between ranks so cells look less flat.
+// Visible board: "tTuong, " per cell, with a blank line between ranks so cells look less flat.
 const CELL_WIDTH = 7;
 const CELL_STRIDE = 9;
 const ROW_STEP = 2;
@@ -65,7 +67,7 @@ export function render(input: RenderInput): Layout {
     const cells = files.map((f) => {
       if (input.hidden) return hex(Math.floor(rng() * 0x40));
       const p = input.grid[r][f];
-      return p ? p.color + NAME[p.type] : EMPTY;
+      return p ? SIDE[p.color] + NAME[p.type] : EMPTY;
     });
     const body = cells.map((c, j) => (j < 7 ? (c + ",").padEnd(stride, " ") : c.padEnd(width, " "))).join("");
     const label = input.hidden ? String(i) : String(8 - r);
@@ -79,10 +81,10 @@ export function render(input: RenderInput): Layout {
       `${INDENT}private enum CellKind { Pawn = 0x9, Knight = 0xA, Bishop = 0xB, Rook = 0xC, Queen = 0xE, King = 0xF }`,
     );
   } else {
-    // Piece legend, disguised as an enum; prefix w = White, b = Black.
+    // Piece legend, disguised as an enum.
     const names = Object.values(NAME);
     lines.push(
-      `${INDENT}private enum Cell { ${[EMPTY, ...names.map((n) => "w" + n), ...names.map((n) => "b" + n)].join(", ")} }`,
+      `${INDENT}private enum Cell { ${[EMPTY, ...names.map((n) => SIDE.w + n), ...names.map((n) => SIDE.b + n)].join(", ")} }`,
     );
   }
   lines.push("");

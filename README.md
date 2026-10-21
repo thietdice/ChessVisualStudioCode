@@ -111,13 +111,13 @@ git clone https://github.com/<user>/<repo>.git
 cd <repo>\extension
 npm ci
 npm run compile
-npm run package          # tạo kv-batch-sync-0.2.0.vsix trong thư mục extension
+npm run package          # tạo kv-batch-sync-0.2.1.vsix trong thư mục extension
 ```
 File `.vsix` không được commit lên repo (đã nằm trong `.gitignore`).
 
 ### 2.2. Cài vào VS Code
 - Extensions (`Ctrl+Shift+X`) → nút `...` góc trên → **Install from VSIX...** → chọn file `.vsix`
-- hoặc: `code --install-extension kv-batch-sync-0.2.0.vsix`
+- hoặc: `code --install-extension kv-batch-sync-0.2.1.vsix`
 
 Cài bản mới đè lên bản cũ cũng làm y như vậy.
 

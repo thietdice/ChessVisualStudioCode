@@ -17,16 +17,16 @@ Bàn cờ là mảng `_grid` trong file `StockMatrix.cs`. Cột `a`–`h` ghi �
         //                       a        b        c        d        e        f        g        h
         private static readonly Cell[][] _grid =
         {
-            /* 8 */ new[] { bRook,   bKnight, bBishop, bQueen,  bKing,   bBishop, bKnight, bRook   },
+            /* 8 */ new[] { dXe,     dMa,     dTuong,  dHau,    dVua,    dTuong,  dMa,     dXe     },
 
-            /* 7 */ new[] { bPawn,   bPawn,   bPawn,   bPawn,   bPawn,   bPawn,   bPawn,   bPawn   },
+            /* 7 */ new[] { dTot,    dTot,    dTot,    dTot,    dTot,    dTot,    dTot,    dTot    },
 
             /* 6 */ new[] { __,      __,      __,      __,      __,      __,      __,      __      },
             ...
-            /* 1 */ new[] { wRook,   wKnight, wBishop, wQueen,  wKing,   wBishop, wKnight, wRook   },
+            /* 1 */ new[] { tXe,     tMa,     tTuong,  tHau,    tVua,    tTuong,  tMa,     tXe     },
         };
 ```
-- Tiền tố `w` = Trắng, `b` = Đen; `__` = ô trống. Tên quân: `Pawn` (Tốt), `Knight` (Mã), `Bishop` (Tượng), `Rook` (Xe), `Queen` (Hậu), `King` (Vua).
+- Tiền tố `t` = Trắng, `d` = Đen; `__` = ô trống. Tên quân: `Tot` (Tốt), `Ma` (Mã), `Tuong` (Tượng), `Xe`, `Hau` (Hậu), `Vua`.
 - Ô tối được tô nền xen kẽ, quân trắng chữ vàng, quân đen chữ xanh. Đổi màu trong Settings (`Ctrl+,` → `kvsync.colors`):
 
 | Setting | Mặc định |
@@ -48,7 +48,7 @@ Giá trị là màu CSS bất kỳ (`#rrggbb`, `rgba(...)`, `red`…). Để tr�
 
 - Khi chọn quân, các ô quân đó **đi được hợp lệ** sẽ được tô nền + viền chấm (giống highlight kết quả tìm kiếm). Gợi ý hiện cả khi đang chờ đối thủ đi, để tính trước nước.
 - Nhấn lại ô đang chọn để bỏ chọn; nhấn quân khác của mình để đổi quân.
-- Con trỏ đặt ở bất kỳ đâu trong tên quân (`wKnight`) hoặc khoảng trống ngay sau nó đều được; dòng trống giữa các hàng không tính.
+- Con trỏ đặt ở bất kỳ đâu trong tên quân (`tMa`) hoặc khoảng trống ngay sau nó đều được; dòng trống giữa các hàng không tính.
 
 **Cách 2 — gõ nước đi** vào dòng `PendingBatch` rồi `Ctrl+S`:
 ```csharp

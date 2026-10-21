@@ -2,7 +2,7 @@
   "name": "kv-batch-sync",
   "displayName": "Kv Batch Sync",
   "description": "Inventory batch synchronisation helpers.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "kv-internal",
   "private": true,
   "engines": {
