@@ -2,160 +2,147 @@
 
 Chơi cờ vua 2 người ngay trong VS Code. Bàn cờ được ngụy trang thành một file C# (`StockMatrix.cs`), nhìn giống bạn đang code.
 
-- `extension/` — VS Code extension (tên hiển thị: **Kv Batch Sync**)
-- `server/` — relay server chạy trên Cloudflare Workers + Durable Objects
+| Thư mục | Nội dung |
+|---|---|
+| `server/` | Relay server chạy trên Cloudflare Workers + Durable Objects (gói miễn phí là đủ) |
+| `extension/` | VS Code extension, tên hiển thị **Kv Batch Sync** |
+| `.github/workflows/deploy-relay.yml` | Tự deploy server khi push thay đổi trong `server/` |
+
+👉 **Cách chơi: xem [PLAY.md](PLAY.md)**
+
+Có 2 trường hợp:
+- **Chỉ muốn chơi** với người đã có server: bỏ qua Phần 1, làm từ [Phần 2](#phần-2--build-và-cài-extension), dùng endpoint họ đưa cho bạn (server hiện tại: `https://chess-relay.thietdice.workers.dev`).
+- **Muốn tự dựng server riêng** (fork/clone về repo của bạn): làm đủ cả 2 phần.
 
 ---
 
-## Cài đặt
+## Phần 1 — Tự deploy server lên Cloudflare
 
-### 1. Deploy server (chỉ cần làm 1 lần)
+### 1.1. Chuẩn bị
+- Tài khoản GitHub và tài khoản [Cloudflare](https://dash.cloudflare.com/sign-up) (miễn phí).
+- [Node.js](https://nodejs.org) 20 trở lên và Git (nếu deploy từ máy).
+
+### 1.2. Lấy code về repo của bạn
+- **Fork:** bấm **Fork** trên GitHub. Sau đó vào tab **Actions** của repo fork và bấm **I understand my workflows, go ahead and enable them** (fork mặc định tắt Actions).
+- **Hoặc clone rồi đẩy sang repo mới:**
+  ```powershell
+  git clone https://github.com/thietdice/ChessVisualStudioCode.git
+  cd ChessVisualStudioCode
+  git remote set-url origin https://github.com/<user-cua-ban>/<ten-repo>.git
+  git push -u origin main
+  ```
+
+### 1.3. Đăng ký subdomain `workers.dev` (1 lần cho mỗi tài khoản Cloudflare)
+Vào [dash.cloudflare.com](https://dash.cloudflare.com) → **Workers & Pages**, Cloudflare sẽ yêu cầu chọn subdomain, ví dụ `tenban` → `tenban.workers.dev`.
+Nếu không thấy màn hình chọn: **Workers & Pages → Overview**, cột bên phải có mục **Subdomain**.
+
+> Bỏ qua bước này, deploy sẽ lỗi:
+> `You can either deploy your worker to one or more routes ... or register a workers.dev subdomain`
+
+### 1.4. (Tuỳ chọn) Đổi tên worker
+Tên worker nằm trong [`server/wrangler.toml`](server/wrangler.toml):
+```toml
+name = "chess-relay"
+```
+URL server sẽ là `https://<name>.<subdomain>.workers.dev`, ví dụ `https://chess-relay.tenban.workers.dev`. Đổi `name` nếu muốn URL khác. Không cần tạo worker trước trên dashboard, lần deploy đầu sẽ tự tạo.
+
+### 1.5. Deploy — chọn 1 trong 2 cách
 
 **Cách A — deploy từ máy**
 ```powershell
 cd server
 npm ci
-npx wrangler login
+npx wrangler login      # mở trình duyệt để đăng nhập Cloudflare
 npm run deploy
 ```
+Cuối log sẽ in ra URL của server.
 
-**Cách B — GitHub Actions (tự deploy khi push thay đổi trong `server/`)**
-1. Cloudflare → **My Profile → API Tokens → Create Token** → template **Edit Cloudflare Workers**.
-2. Lấy **Account ID**: đoạn 32 ký tự trên URL `dash.cloudflare.com/<account-id>/...`, hoặc chạy `npx wrangler whoami`.
-3. GitHub repo → **Settings → Secrets and variables → Actions**, thêm `CLOUDFLARE_API_TOKEN` và `CLOUDFLARE_ACCOUNT_ID`.
-4. **Actions → Deploy relay → Run workflow**.
+**Cách B — GitHub Actions (tự deploy mỗi lần push thay đổi trong `server/`)**
+1. Tạo API token: Cloudflare → **My Profile → API Tokens → Create Token** → template **Edit Cloudflare Workers** → copy token.
+2. Lấy **Account ID**, một trong các cách:
+   - đoạn 32 ký tự trên URL dashboard: `dash.cloudflare.com/<account-id>/...`
+   - **Workers & Pages** → cột phải → **Account details**
+   - chạy `npx wrangler whoami`
 
-> Lần đầu dùng Workers, account phải có subdomain `workers.dev`: vào **Workers & Pages** trên dashboard để đăng ký. Nếu chưa có, deploy sẽ lỗi `register a workers.dev subdomain`.
+   (Đừng nhầm với **Zone ID**, cái đó gắn với domain, không dùng ở đây.)
+3. Repo GitHub → **Settings → Secrets and variables → Actions → New repository secret**, thêm:
 
-Kiểm tra: mở `https://chess-relay.<subdomain>.workers.dev/health`, thấy `ok` là được.
+   | Name | Value |
+   |---|---|
+   | `CLOUDFLARE_API_TOKEN` | token ở bước 1 |
+   | `CLOUDFLARE_ACCOUNT_ID` | account ID ở bước 2 |
+4. Tab **Actions → Deploy relay → Run workflow** để deploy lần đầu. Log bước `npx wrangler deploy` có in URL server.
 
-Server hiện tại: `https://chess-relay.thietdice.workers.dev`
+### 1.6. Kiểm tra
+Mở `https://<name>.<subdomain>.workers.dev/health`, thấy `ok` là server đã chạy.
 
-### 2. Build & cài extension
+### 1.7. (Tuỳ chọn) Gắn sẵn URL server vào extension
+Mặc định extension trỏ về `http://127.0.0.1:8787` (server chạy local), nên mỗi người phải tự đặt setting `kvsync.endpoint`. Để khỏi phải đặt, sửa giá trị mặc định trong [`extension/package.json`](extension/package.json):
+```json
+"kvsync.endpoint": {
+  "type": "string",
+  "default": "https://chess-relay.tenban.workers.dev",
+  ...
+}
+```
+rồi build lại extension (Phần 2).
+
+---
+
+## Phần 2 — Build và cài extension
+
+### 2.1. Build ra file `.vsix`
 ```powershell
-cd extension
+git clone https://github.com/<user>/<repo>.git
+cd <repo>\extension
 npm ci
 npm run compile
-npm run package        # tạo kv-batch-sync-0.1.0.vsix
-code --install-extension kv-batch-sync-0.1.0.vsix
+npm run package          # tạo kv-batch-sync-0.1.0.vsix trong thư mục extension
 ```
-Hoặc trong VS Code: Extensions (`Ctrl+Shift+X`) → `...` → **Install from VSIX...**
+File `.vsix` không được commit lên repo (đã nằm trong `.gitignore`). Người chơi cùng không cần build, chỉ cần bạn gửi họ file này.
 
-Người chơi cùng chỉ cần file `.vsix`, không cần build.
+### 2.2. Cài vào VS Code
+- Extensions (`Ctrl+Shift+X`) → nút `...` góc trên → **Install from VSIX...** → chọn file `.vsix`
+- hoặc: `code --install-extension kv-batch-sync-0.1.0.vsix`
 
-### 3. Cấu hình
+Cài bản mới đè lên bản cũ cũng làm y như vậy.
+
+### 2.3. Cấu hình
 `Ctrl+,` → tìm `kvsync`:
 
 | Setting | Giá trị |
 |---|---|
-| `kvsync.endpoint` | `https://chess-relay.thietdice.workers.dev` |
+| `kvsync.endpoint` | URL server, ví dụ `https://chess-relay.thietdice.workers.dev` (bỏ qua nếu đã làm bước 1.7) |
 | `kvsync.author` | Tên hiển thị của đối thủ trong dòng "blame" (tuỳ chọn) |
 
----
+### 2.4. Nạp lại VS Code
+`Ctrl+Shift+P` → **Developer: Reload Window**. Gõ `Ctrl+Shift+P` → `Kv:` sẽ thấy 10 lệnh của extension.
 
-## Cách chơi
-
-### Vào trận
-- **Tạo phòng:** `Ctrl+Shift+P` → **Kv: Open Batch Session**. Mã phòng 6 ký tự được tự copy vào clipboard, gửi cho bạn chơi.
-- **Vào phòng:** `Ctrl+Shift+P` → **Kv: Attach Batch Session** → dán mã.
-
-Phe trắng/đen được chia ngẫu nhiên. Bàn cờ luôn xoay cho quân của mình ở dưới.
-
-> Phải có **đủ 2 người** trong phòng thì ván mới bắt đầu. Khi chỉ có 1 người, chọn quân được nhưng không đi được (báo lỗi `CS0162`).
-
-### Đọc bàn cờ
-Bàn cờ là mảng `_grid`. Cột `a`–`h` ghi ở dòng comment phía trên, hàng ghi trong `/* 8 */`.
-
-| Quân | Trắng | Đen |
-|---|---|---|
-| Tốt | `0x09` | `0x19` |
-| Mã | `0x0A` | `0x1A` |
-| Tượng | `0x0B` | `0x1B` |
-| Xe | `0x0C` | `0x1C` |
-| Hậu | `0x0E` | `0x1E` |
-| Vua | `0x0F` | `0x1F` |
-| Ô trống | `__` | |
-
-Mẹo nhớ: số đầu `0` = trắng, `1` = đen; chữ cuối **9 A B C E F** = Tốt, Mã, Tượng, Xe, Hậu, Vua.
-
-Ngay dưới grid có sẵn chú thích, ngụy trang thành enum:
-```csharp
-        // high nibble: 0x0_ = White, 0x1_ = Black
-        private enum CellKind { Pawn = 0x9, Knight = 0xA, Bishop = 0xB, Rook = 0xC, Queen = 0xE, King = 0xF }
-```
-
-### Đi quân
-**Cách 1 — phím tắt**
-1. Đặt con trỏ vào ô quân của mình → `Ctrl+Alt+M` (ô được viền).
-2. Đặt con trỏ vào ô đích → `Ctrl+Alt+M`.
-
-Nhấn lại ô đang chọn để bỏ chọn; nhấn quân khác của mình để đổi quân. Con trỏ phải nằm trên chính ô (`0x0C`, `__`), không phải dấu phẩy hay khoảng trắng.
-
-**Cách 2 — gõ nước đi** rồi `Ctrl+S`:
-```csharp
-private const string PendingBatch = "e2e4";
-```
-- Phong cấp: `e7e8n` (`q`/`r`/`b`/`n`). Không ghi thì tự phong Hậu.
-- Nhập thành: đi nước của vua, ví dụ `e1g1`.
-
-### Trạng thái
-| `BatchStatus` | Status bar | Nghĩa |
-|---|---|---|
-| `Idle` | `Kv.Core: restoring` | Chờ đối thủ vào phòng |
-| `Pending` | `Kv.Core: 1 pending` | **Tới lượt bạn** |
-| `Queued` | `Kv.Core` | Tới lượt đối thủ |
-| `Committed` | `build succeeded` | Thắng |
-| `RolledBack` | `build failed` | Thua |
-| `Merged` | `built with warnings` | Hoà |
-
-- **Nước vừa đi:** 2 ô được tô nền, cuối dòng có ghi chú kiểu git blame.
-- **Bị chiếu:** gạch vàng `CS0618` dưới quân vua.
-- **Lỗi** (gạch đỏ ở dòng `PendingBatch`):
-  - `CS1503` — nước đi không hợp lệ
-  - `CS4014` — chưa tới lượt
-  - `CS0162` — ván chưa bắt đầu hoặc đã kết thúc
-- Icon ngắt kết nối cạnh `Kv.Core` = đối thủ đang offline.
-
-### Phím tắt & menu
-| Thao tác | Cách làm |
-|---|---|
-| Chọn / đi quân | `Ctrl+Alt+M` |
-| Ẩn / hiện bàn cờ khẩn cấp | `Ctrl+Alt+H` |
-| Mở menu | Bấm **Kv.Core** ở status bar, hoặc **Kv: Batch Menu** |
-| Cầu hoà | Menu → **Propose merge** (đối thủ nhận popup Accept/Decline) |
-| Xin thua | Menu → **Abort batch** |
-| Copy lại mã phòng | Menu → **Copy session key** |
-| Thoát phòng | Menu → **Close session** |
-
-**Mất kết nối / lỡ đóng VS Code:** chạy **Kv: Attach Batch Session**, mã phòng cũ đã điền sẵn, Enter là vào lại đúng phe.
+Xong — sang [PLAY.md](PLAY.md) để chơi.
 
 ---
 
-## Xử lý sự cố
+## Xử lý sự cố khi cài đặt
 
 | Triệu chứng | Nguyên nhân / cách xử lý |
 |---|---|
-| Chọn được quân nhưng không đi được, lỗi `CS0162` | Chưa đủ 2 người trong phòng |
-| Status bar chỉ có icon xoay mãi | Không kết nối được server: kiểm tra `kvsync.endpoint`, hoặc mạng công ty chặn `workers.dev` |
-| `Ctrl+Alt+M` không phản hồi | Thử `Ctrl+Shift+P` → **Kv: Mark Batch Cell**. Nếu chạy được thì phím đang bị chiếm (Unikey/EVKey…): tắt bộ gõ hoặc đổi phím tại `Ctrl+K Ctrl+S` → `kvsync.mark` |
+| Deploy lỗi `register a workers.dev subdomain` | Chưa làm bước 1.3 |
+| Actions lỗi xác thực Cloudflare | Sai/thiếu secret `CLOUDFLARE_API_TOKEN` hoặc `CLOUDFLARE_ACCOUNT_ID` |
+| Repo fork không chạy workflow | Chưa bật Actions cho fork (bước 1.2) |
+| `/health` không mở được ngay sau khi tạo subdomain | DNS cần vài phút, đợi rồi thử lại |
+| `curl` trên Windows báo `CRYPT_E_NO_REVOCATION_CHECK` | Do mạng công ty; thêm `--ssl-no-revoke`, server vẫn chạy bình thường |
+| Không thấy lệnh `Kv: ...` trong Command Palette | Chưa reload window, hoặc extension đang bị Disable trong tab Extensions |
 | `kvsync.endpoint is not configured` | Chưa đặt setting `kvsync.endpoint` |
-| `Session ... not found` | Sai mã phòng |
-| `Session ... is locked by another process` | Phòng đã đủ 2 người |
-
-### Tự test một mình trên 1 máy
-Hai cửa sổ VS Code thường dùng chung bộ nhớ extension nên cửa sổ thứ 2 sẽ chiếm phe của cửa sổ 1. Mở một instance với profile riêng:
-```powershell
-code --user-data-dir "$env:TEMP\vscode-p2" --extensions-dir "$env:TEMP\vscode-p2-ext"
-```
-Cài `.vsix`, đặt `kvsync.endpoint`, rồi **Kv: Attach Batch Session** bằng mã phòng của cửa sổ 1.
 
 ---
 
 ## Phát triển
 ```powershell
 # Server chạy local tại http://127.0.0.1:8787 (giá trị mặc định của kvsync.endpoint)
-cd server && npm run dev
+cd server
+npm run dev
 
-# Extension: mở thư mục extension/ trong VS Code, nhấn F5
-cd extension && npm run watch
+# Extension: mở thư mục extension/ trong VS Code rồi nhấn F5
+cd extension
+npm run watch
 ```
