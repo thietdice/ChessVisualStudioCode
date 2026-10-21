@@ -60,6 +60,10 @@ export function render(input: RenderInput): Layout {
   });
   lines.push(`${INDENT}};`);
   lines.push("");
+  // Piece legend (P N B R Q K), disguised as an enum; high nibble 0 = white, 1 = black.
+  lines.push(`${INDENT}// high nibble: 0x0_ = W, 0x1_ = B`);
+  lines.push(`${INDENT}private enum CellKind { P = 0x9, N = 0xA, B = 0xB, R = 0xC, Q = 0xE, K = 0xF }`);
+  lines.push("");
   lines.push(`${INDENT}private const string BatchStatus = "${input.status}";`);
   const pendingLine = lines.length;
   lines.push(`${INDENT}private const string PendingBatch = "";`);

@@ -78,6 +78,13 @@ Bàn cờ là mảng `_grid`. Cột `a`–`h` ghi ở dòng comment phía trên,
 
 Mẹo nhớ: số đầu `0` = trắng, `1` = đen; chữ cuối **9 A B C E F** = Tốt, Mã, Tượng, Xe, Hậu, Vua.
 
+Ngay dưới grid có sẵn chú thích, ngụy trang thành enum:
+```csharp
+        // high nibble: 0x0_ = W, 0x1_ = B
+        private enum CellKind { P = 0x9, N = 0xA, B = 0xB, R = 0xC, Q = 0xE, K = 0xF }
+```
+`P` Pawn (Tốt), `N` Knight (Mã), `B` Bishop (Tượng), `R` Rook (Xe), `Q` Queen (Hậu), `K` King (Vua).
+
 ### Đi quân
 **Cách 1 — phím tắt**
 1. Đặt con trỏ vào ô quân của mình → `Ctrl+Alt+M` (ô được viền).
