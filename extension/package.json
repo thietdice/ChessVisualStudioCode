@@ -1,0 +1,105 @@
+{
+  "name": "kv-batch-sync",
+  "displayName": "Kv Batch Sync",
+  "description": "Inventory batch synchronisation helpers.",
+  "version": "0.1.0",
+  "publisher": "kv-internal",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onFileSystem:kvsrc"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "kvsync.open",
+        "title": "Kv: Open Batch Session"
+      },
+      {
+        "command": "kvsync.attach",
+        "title": "Kv: Attach Batch Session"
+      },
+      {
+        "command": "kvsync.mark",
+        "title": "Kv: Mark Batch Cell"
+      },
+      {
+        "command": "kvsync.toggle",
+        "title": "Kv: Toggle Preview"
+      },
+      {
+        "command": "kvsync.offerDraw",
+        "title": "Kv: Propose Merge"
+      },
+      {
+        "command": "kvsync.acceptDraw",
+        "title": "Kv: Accept Merge"
+      },
+      {
+        "command": "kvsync.resign",
+        "title": "Kv: Abort Batch"
+      },
+      {
+        "command": "kvsync.copyKey",
+        "title": "Kv: Copy Session Key"
+      },
+      {
+        "command": "kvsync.close",
+        "title": "Kv: Close Batch Session"
+      },
+      {
+        "command": "kvsync.menu",
+        "title": "Kv: Batch Menu"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "kvsync.mark",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorTextFocus && resourceScheme == kvsrc"
+      },
+      {
+        "command": "kvsync.toggle",
+        "key": "ctrl+alt+h",
+        "mac": "cmd+alt+h"
+      }
+    ],
+    "configuration": {
+      "title": "Kv Batch Sync",
+      "properties": {
+        "kvsync.endpoint": {
+          "type": "string",
+          "default": "http://127.0.0.1:8787",
+          "description": "Sync relay endpoint."
+        },
+        "kvsync.author": {
+          "type": "string",
+          "default": "dev-team",
+          "description": "Author name shown for upstream changes."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "package": "vsce package --allow-missing-repository --skip-license"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/vscode": "^1.90.0",
+    "@types/ws": "^8.18.2",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^7.0.2"
+  }
+}
