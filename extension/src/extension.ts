@@ -65,6 +65,8 @@ class Controller implements vscode.Disposable {
   });
   private readonly targetDeco = vscode.window.createTextEditorDecorationType({
     backgroundColor: new vscode.ThemeColor("editor.findMatchHighlightBackground"),
+    border: "1px dotted",
+    borderColor: new vscode.ThemeColor("editorLineNumber.activeForeground"),
   });
   private readonly blameDeco = vscode.window.createTextEditorDecorationType({
     after: { color: new vscode.ThemeColor("editorCodeLens.foreground"), fontStyle: "italic", margin: "0 0 0 3em" },
@@ -386,7 +388,9 @@ class Controller implements vscode.Disposable {
     };
     const lastRanges = show && last ? [cell(last.slice(0, 2)), cell(last.slice(2, 4))] : [];
     const selRanges = show && this.selected ? [cell(this.selected)] : [];
-    const targetRanges = show && this.selected ? legalTargets(s.fen, this.selected).map(cell) : [];
+    const targetRanges = show && this.selected && this.color
+      ? legalTargets(s.fen, this.selected, this.color).map(cell)
+      : [];
     const blame: vscode.DecorationOptions[] = [];
     if (show && last) {
       const line = layout.squarePos(last.slice(2, 4)).line;
@@ -409,10 +413,18 @@ class Controller implements vscode.Disposable {
   }
 }
 
-/** Destination squares of the legal moves from `square`; empty when it is not that piece's turn. */
-function legalTargets(fen: string, square: string): string[] {
+/**
+ * Destination squares of the legal moves from `square`, evaluated as if it were `color`'s turn
+ * so hints also show while waiting for the opponent.
+ */
+function legalTargets(fen: string, square: string, color: Color): string[] {
   try {
-    const moves = new Chess(fen).moves({ square: square as any, verbose: true });
+    const parts = fen.split(" ");
+    if (parts[1] !== color) {
+      parts[1] = color;
+      parts[3] = "-"; // en passant only applies to the side actually on move
+    }
+    const moves = new Chess(parts.join(" ")).moves({ square: square as any, verbose: true });
     return [...new Set(moves.map((m) => m.to as string))];
   } catch {
     return [];

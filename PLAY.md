@@ -46,7 +46,7 @@ Chú thích `CellKind` ngay dưới bàn cờ: số đầu `0` = trắng, `1` = 
 1. Đặt con trỏ vào ô quân của mình → `Ctrl+Alt+M` (ô được viền).
 2. Đặt con trỏ vào ô đích → `Ctrl+Alt+M`.
 
-- Khi chọn quân, các ô quân đó **đi được hợp lệ** sẽ được tô nền (giống highlight kết quả tìm kiếm). Chỉ hiện khi đang tới lượt bạn.
+- Khi chọn quân, các ô quân đó **đi được hợp lệ** sẽ được tô nền + viền chấm (giống highlight kết quả tìm kiếm). Gợi ý hiện cả khi đang chờ đối thủ đi, để tính trước nước.
 - Nhấn lại ô đang chọn để bỏ chọn; nhấn quân khác của mình để đổi quân.
 - Con trỏ phải nằm trên chính ô (`0x0C`, `__`), không phải dấu phẩy hay khoảng trắng.
 
