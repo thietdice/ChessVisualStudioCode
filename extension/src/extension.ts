@@ -1,16 +1,22 @@
 import * as vscode from "vscode";
 import { Chess } from "chess.js";
-import { Color, findKing, parseFen, pieceAt, squareName } from "./board";
+import { Chess as Xiangqi } from "@weshell/xiangqi.js";
+import { Color, GEOMETRY, START_FEN, Variant, findKing, parseFen, pieceAt, squareName } from "./board";
 import { FILE_URI, MatrixFileSystem, SCHEME } from "./fs";
 import { ErrorMsg, Session, StateMsg } from "./net";
 import { Layout, parsePending, render } from "./render";
 
-const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-const UCI = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
+const UCI: Record<Variant, RegExp> = {
+  chess: /^[a-h][1-8][a-h][1-8][qrbn]?$/,
+  xiangqi: /^[a-i][0-9][a-i][0-9]$/,
+};
 const TOKENS_KEY = "kvsync.tokens";
 const LAST_ROOM_KEY = "kvsync.lastRoom";
-const SIDE = { w: "White", b: "Black" } as const;
+const SIDE: Record<Variant, Record<Color, string>> = {
+  chess: { w: "White", b: "Black" },
+  xiangqi: { w: "Red", b: "Black" },
+};
 
 // Server error codes rendered as compiler diagnostics on the PendingBatch line.
 const ERROR_TEXT: Record<string, string> = {
@@ -32,6 +38,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("kvsync.resign", () => controller.resign()),
     vscode.commands.registerCommand("kvsync.offerDraw", () => controller.send({ type: "draw_offer" })),
     vscode.commands.registerCommand("kvsync.acceptDraw", () => controller.send({ type: "draw_accept" })),
+    vscode.commands.registerCommand("kvsync.rematch", () => controller.send({ type: "rematch_offer" })),
+    vscode.commands.registerCommand("kvsync.acceptRematch", () => controller.send({ type: "rematch_accept" })),
     vscode.commands.registerCommand("kvsync.copyKey", () => controller.copyKey()),
     vscode.commands.registerCommand("kvsync.close", () => controller.stop()),
     vscode.commands.registerCommand("kvsync.menu", () => controller.menu()),
@@ -42,6 +50,7 @@ export function deactivate(): void {}
 
 class Controller implements vscode.Disposable {
   private session?: Session;
+  private variant: Variant = "chess";
   private color?: Color;
   private state?: StateMsg;
   private layout?: Layout;
@@ -100,8 +109,19 @@ class Controller implements vscode.Disposable {
 
   // ---- commands -------------------------------------------------------------
 
-  async create(): Promise<void> {
-    await this.start(randomCode(), "create");
+  async create(variant?: Variant): Promise<void> {
+    if (!variant) {
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: "Batch mode: standard", description: "chess", variant: "chess" as const },
+          { label: "Batch mode: extended", description: "xiangqi", variant: "xiangqi" as const },
+        ],
+        { placeHolder: "Kv.Core" },
+      );
+      if (!pick) return;
+      variant = pick.variant;
+    }
+    await this.start(randomCode(), "create", undefined, variant);
   }
 
   async attach(): Promise<void> {
@@ -125,7 +145,7 @@ class Controller implements vscode.Disposable {
     const square = this.layout.squareAt(pos.line, pos.character);
     if (!square) return;
 
-    const piece = pieceAt(parseFen(this.state.fen), square);
+    const piece = pieceAt(GEOMETRY[this.variant], parseFen(this.state.fen), square);
     const own = piece?.color === this.color;
     if (!this.selected || own) {
       // Select an own piece; pressing again on the selected one clears it.
@@ -161,7 +181,16 @@ class Controller implements vscode.Disposable {
   async menu(): Promise<void> {
     const offeredToMe = this.state?.drawOffer && this.state.drawOffer !== this.color;
     const playing = this.state?.status === "playing";
+    const over = !!this.state && !playing && this.state.status !== "waiting";
+    const rerunOffered = over && this.state?.rematchOffer && this.state.rematchOffer !== this.color;
     const items: (vscode.QuickPickItem & { cmd: string })[] = [
+      ...(over
+        ? [
+            rerunOffered
+              ? { label: "$(debug-restart) Accept rerun request", description: "accept rematch", cmd: "kvsync.acceptRematch" }
+              : { label: "$(debug-restart) Rerun batch", description: "rematch", cmd: "kvsync.rematch" },
+          ]
+        : []),
       ...(playing
         ? [
             { label: "$(circle-slash) Abort batch", description: "resign", cmd: "kvsync.resign" },
@@ -198,7 +227,7 @@ class Controller implements vscode.Disposable {
 
   // ---- session --------------------------------------------------------------
 
-  private async start(room: string, intent: "create" | "join", token?: string): Promise<void> {
+  private async start(room: string, intent: "create" | "join", token?: string, variant: Variant = "chess"): Promise<void> {
     const endpoint = vscode.workspace.getConfiguration("kvsync").get<string>("endpoint");
     if (!endpoint) {
       vscode.window.showErrorMessage("kvsync.endpoint is not configured.");
@@ -206,22 +235,27 @@ class Controller implements vscode.Disposable {
     }
     this.stop();
 
-    const session = new Session(endpoint, room, intent, token);
+    const session = new Session(endpoint, room, intent, token, variant);
     this.session = session;
+    this.variant = variant;
     this.notified.clear();
+    let announced = false;
     session.onWelcome(async (w) => {
+      // A second welcome on the same connection means a rematch swapped sides.
+      if (this.color && this.color !== w.color) this.selected = undefined;
       this.color = w.color;
       const tokens = this.ctx.globalState.get<Record<string, string>>(TOKENS_KEY) ?? {};
       await this.ctx.globalState.update(TOKENS_KEY, { ...tokens, [room]: w.token });
       await this.ctx.globalState.update(LAST_ROOM_KEY, room);
-      if (intent === "create" && !token) {
+      if (intent === "create" && !token && !announced) {
+        announced = true;
         await vscode.env.clipboard.writeText(room);
         vscode.window.showInformationMessage(`Session ${room} ready (key copied to clipboard).`);
       }
       this.refresh();
     });
     session.onState((s) => this.onState(s));
-    session.onError((e) => this.onServerError(e, session, intent));
+    session.onError((e) => this.onServerError(e, session, intent, variant));
     session.onConnected((c) => {
       this.connected = c;
       this.updateStatusBar();
@@ -233,11 +267,11 @@ class Controller implements vscode.Disposable {
     await vscode.window.showTextDocument(doc, { preview: false });
   }
 
-  private onServerError(e: ErrorMsg, session: Session, intent: "create" | "join"): void {
+  private onServerError(e: ErrorMsg, session: Session, intent: "create" | "join", variant: Variant): void {
     if (session !== this.session) return;
     switch (e.code) {
       case "exists":
-        if (intent === "create") void this.create();
+        if (intent === "create") void this.create(variant);
         return;
       case "not_found":
         vscode.window.showErrorMessage(`Session ${session.room} not found.`);
@@ -254,6 +288,12 @@ class Controller implements vscode.Disposable {
   }
 
   private onState(s: StateMsg): void {
+    const prev = this.state;
+    if (prev && prev.status !== "playing" && prev.status !== "waiting" && s.status === "playing") {
+      // Rematch started: forget the previous game's popups.
+      this.notified.clear();
+    }
+    this.variant = s.variant ?? "chess";
     if (s.moves.length !== this.state?.moves.length) {
       this.lastMoveAt = Date.now();
       this.selected = undefined;
@@ -271,6 +311,14 @@ class Controller implements vscode.Disposable {
           else if (pick === "Decline") this.send({ type: "draw_decline" });
         });
     }
+    if (s.status !== "playing" && s.status !== "waiting" && s.rematchOffer && s.rematchOffer !== me && this.once("rematch")) {
+      void vscode.window
+        .showInformationMessage("Rerun requested by upstream.", "Accept", "Decline")
+        .then((pick) => {
+          if (pick === "Accept") this.send({ type: "rematch_accept" });
+          else if (pick === "Decline") this.send({ type: "rematch_decline" });
+        });
+    }
     if (s.status !== "playing" && s.status !== "waiting" && this.once("end")) {
       const note = this.noteLabel();
       if (!s.winner) vscode.window.showWarningMessage(`Build succeeded with warnings: ${note}.`);
@@ -282,7 +330,7 @@ class Controller implements vscode.Disposable {
   private onSave(text: string): void {
     const pending = parsePending(text);
     if (pending) {
-      if (UCI.test(pending)) this.sendMove(pending);
+      if (UCI[this.variant].test(pending)) this.sendMove(pending);
       else this.error = "bad_move";
     }
     this.refresh(true);
@@ -307,7 +355,8 @@ class Controller implements vscode.Disposable {
 
   private refresh(force = false): void {
     this.layout = render({
-      grid: parseFen(this.state?.fen ?? START_FEN),
+      variant: this.variant,
+      grid: parseFen(this.state?.fen ?? START_FEN[this.variant]),
       orientation: this.color ?? "w",
       sessionKey: this.session?.room ?? "",
       status: this.hidden ? "Idle" : this.statusLabel(),
@@ -335,12 +384,13 @@ class Controller implements vscode.Disposable {
   private noteLabel(): string {
     const s = this.state;
     if (!s) return "";
-    if (s.status === "playing") return s.check ? `${SIDE[s.turn]} in check` : "";
+    const side = SIDE[this.variant];
+    if (s.status === "playing") return s.check ? `${side[s.turn]} in check` : "";
     if (s.status === "waiting") return "";
     const reason = (s.reason ?? s.status).replace(/_/g, " ");
     if (!s.winner) return `Draw - ${reason}`;
-    const winner = SIDE[s.winner];
-    if (s.reason === "resign") return `${SIDE[s.winner === "w" ? "b" : "w"]} resigned - ${winner} wins`;
+    const winner = side[s.winner];
+    if (s.reason === "resign") return `${side[s.winner === "w" ? "b" : "w"]} resigned - ${winner} wins`;
     return `${reason[0].toUpperCase()}${reason.slice(1)} - ${winner} wins`;
   }
 
@@ -359,6 +409,8 @@ class Controller implements vscode.Disposable {
       else if (s.turn === this.color) text = "$(git-commit) Kv.Core: 1 pending";
       const opponent = this.color === "w" ? "b" : "w";
       if (!s.online[opponent]) text += " $(debug-disconnect)";
+    } else if (s.rematchOffer && s.rematchOffer !== this.color) {
+      text = "$(git-pull-request) Kv.Core: 1 review";
     } else if (!s.winner) {
       text = "$(warning) Kv.Core: built with warnings";
     } else {
@@ -375,7 +427,7 @@ class Controller implements vscode.Disposable {
     const list: vscode.Diagnostic[] = [];
     if (layout && !this.hidden) {
       if (s?.status === "playing" && s.check && s.turn === this.color) {
-        const king = findKing(parseFen(s.fen), s.turn);
+        const king = findKing(GEOMETRY[this.variant], parseFen(s.fen), s.turn);
         if (king) {
           const p = layout.squarePos(king);
           const d = new vscode.Diagnostic(
@@ -418,18 +470,21 @@ class Controller implements vscode.Disposable {
     const lastRanges = show && last ? [cell(last.slice(0, 2)), cell(last.slice(2, 4))] : [];
     const selRanges = show && this.selected ? [cell(this.selected)] : [];
     const targetRanges = show && this.selected && this.color
-      ? legalTargets(s.fen, this.selected, this.color).map(cell)
+      ? legalTargets(this.variant, s.fen, this.selected, this.color).map(cell)
       : [];
     const darkRanges: vscode.Range[] = [];
     const whiteRanges: vscode.Range[] = [];
     const blackRanges: vscode.Range[] = [];
     if (show) {
+      const geo = GEOMETRY[this.variant];
       const grid = parseFen(s.fen);
-      for (let r = 0; r < 8; r++) {
-        for (let f = 0; f < 8; f++) {
-          const sq = squareName(f, r);
-          if ((f + r) % 2 === 1) darkRanges.push(cell(sq));
-          const p = grid[r][f];
+      for (let r = 0; r < geo.ranks; r++) {
+        for (let f = 0; f < geo.files.length; f++) {
+          const sq = squareName(geo, f, r);
+          // Chess: checkerboard. Xiangqi: tint the two palaces instead.
+          const tinted = this.variant === "xiangqi" ? f >= 3 && f <= 5 && (r <= 2 || r >= 7) : (f + r) % 2 === 1;
+          if (tinted) darkRanges.push(cell(sq));
+          const p = grid[r]?.[f];
           if (p) (p.color === "w" ? whiteRanges : blackRanges).push(cell(sq));
         }
       }
@@ -464,14 +519,15 @@ class Controller implements vscode.Disposable {
  * Destination squares of the legal moves from `square`, evaluated as if it were `color`'s turn
  * so hints also show while waiting for the opponent.
  */
-function legalTargets(fen: string, square: string, color: Color): string[] {
+function legalTargets(variant: Variant, fen: string, square: string, color: Color): string[] {
   try {
     const parts = fen.split(" ");
     if (parts[1] !== color) {
       parts[1] = color;
       parts[3] = "-"; // en passant only applies to the side actually on move
     }
-    const moves = new Chess(parts.join(" ")).moves({ square: square as any, verbose: true });
+    const game = variant === "xiangqi" ? new Xiangqi(parts.join(" ")) : new Chess(parts.join(" "));
+    const moves = game.moves({ square: square as any, verbose: true }) as { to: string }[];
     return [...new Set(moves.map((m) => m.to as string))];
   } catch {
     return [];

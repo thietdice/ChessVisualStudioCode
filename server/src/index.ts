@@ -1,32 +1,42 @@
 import { DurableObject } from "cloudflare:workers";
 import { Chess } from "chess.js";
+import { Chess as Xiangqi } from "@weshell/xiangqi.js";
 
 export interface Env {
   ROOMS: DurableObjectNamespace<Room>;
 }
 
 type Color = "w" | "b";
+type Variant = "chess" | "xiangqi";
 type Status = "waiting" | "playing" | "checkmate" | "stalemate" | "draw" | "resigned" | "aborted";
 
 interface RoomData {
+  variant?: Variant; // missing on rooms created before xiangqi support = chess
   tokens: Partial<Record<Color, string>>;
   moves: string[]; // UCI, e.g. "e2e4", "e7e8q"
   status: Status;
   winner: Color | null;
   reason: string | null;
   drawOffer: Color | null;
+  rematchOffer?: Color | null;
 }
 
 type ClientMsg =
-  | { type: "hello"; intent: "create" | "join"; token?: string }
+  | { type: "hello"; intent: "create" | "join"; token?: string; variant?: Variant }
   | { type: "move"; uci: string }
   | { type: "resign" }
   | { type: "draw_offer" }
   | { type: "draw_accept" }
-  | { type: "draw_decline" };
+  | { type: "draw_decline" }
+  | { type: "rematch_offer" }
+  | { type: "rematch_accept" }
+  | { type: "rematch_decline" };
 
 const ROOM_CODE = /^[A-Z0-9]{4,12}$/;
-const UCI = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
+const UCI: Record<Variant, RegExp> = {
+  chess: /^[a-h][1-8][a-h][1-8][qrbn]?$/,
+  xiangqi: /^[a-i][0-9][a-i][0-9]$/,
+};
 const IDLE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export default {
@@ -70,6 +80,7 @@ export class Room extends DurableObject<Env> {
     const color = (ws.deserializeAttachment() as { color?: Color } | null)?.color;
     const data = await this.load();
     if (!color || !data) return this.sendError(ws, "not_joined");
+    if (msg.type.startsWith("rematch_")) return this.onRematch(ws, data, color, msg.type);
     if (data.status !== "playing") return this.sendError(ws, "game_over");
 
     switch (msg.type) {
@@ -118,7 +129,8 @@ export class Room extends DurableObject<Env> {
 
     if (!data) {
       if (msg.intent !== "create") return this.sendError(ws, "not_found", true);
-      data = { tokens: {}, moves: [], status: "waiting", winner: null, reason: null, drawOffer: null };
+      const variant: Variant = msg.variant === "xiangqi" ? "xiangqi" : "chess";
+      data = { variant, tokens: {}, moves: [], status: "waiting", winner: null, reason: null, drawOffer: null };
     } else if (msg.intent === "create" && !msg.token) {
       return this.sendError(ws, "exists", true);
     }
@@ -148,7 +160,9 @@ export class Room extends DurableObject<Env> {
   }
 
   private async onMove(ws: WebSocket, data: RoomData, color: Color, uci: string): Promise<void> {
-    if (!UCI.test(uci)) return this.sendError(ws, "bad_move");
+    const variant = data.variant ?? "chess";
+    if (!UCI[variant].test(uci)) return this.sendError(ws, "bad_move");
+    if (variant === "xiangqi") return this.onXiangqiMove(ws, data, color, uci);
     const chess = replay(data.moves);
     if (chess.turn() !== color) return this.sendError(ws, "not_your_turn");
 
@@ -183,8 +197,64 @@ export class Room extends DurableObject<Env> {
     this.broadcast(data);
   }
 
+  private async onXiangqiMove(ws: WebSocket, data: RoomData, color: Color, uci: string): Promise<void> {
+    const game = replayXiangqi(data.moves);
+    if (game.turn() !== color) return this.sendError(ws, "not_your_turn");
+
+    let made;
+    try {
+      made = game.move({ from: uci.slice(0, 2) as any, to: uci.slice(2, 4) as any });
+    } catch {
+      return this.sendError(ws, "illegal_move");
+    }
+
+    data.moves.push(made.from + made.to);
+    data.drawOffer = null;
+    // In xiangqi having no legal move loses, whether or not the king is in check.
+    if (game.isCheckmate()) {
+      data.status = "checkmate";
+      data.winner = color;
+      data.reason = game.inCheck() ? "checkmate" : "no_moves";
+    } else if (game.isDraw()) {
+      data.status = "draw";
+      data.reason = game.isThreefoldRepetition() ? "threefold_repetition"
+        : game.isInsufficientMaterial() ? "insufficient_material" : "fifty_moves";
+    }
+    await this.save(data);
+    this.broadcast(data);
+  }
+
+  /** Rematch in the same room once the game is over; players swap sides. */
+  private async onRematch(ws: WebSocket, data: RoomData, color: Color, type: string): Promise<void> {
+    if (data.status === "playing" || data.status === "waiting") return this.sendError(ws, "not_over");
+    if (type === "rematch_offer") {
+      data.rematchOffer = color;
+    } else if (type === "rematch_decline") {
+      data.rematchOffer = null;
+    } else {
+      if (data.rematchOffer !== other(color)) return this.sendError(ws, "no_rematch_offer");
+      data.tokens = { w: data.tokens.b, b: data.tokens.w };
+      data.moves = [];
+      data.status = "playing";
+      data.winner = null;
+      data.reason = null;
+      data.drawOffer = null;
+      data.rematchOffer = null;
+      for (const s of this.ctx.getWebSockets()) {
+        const old = (s.deserializeAttachment() as { color?: Color } | null)?.color;
+        if (!old) continue;
+        const swapped = other(old);
+        s.serializeAttachment({ color: swapped });
+        try { s.send(JSON.stringify({ type: "welcome", color: swapped, token: data.tokens[swapped] })); } catch { /* gone */ }
+      }
+    }
+    await this.save(data);
+    this.broadcast(data);
+  }
+
   private broadcast(data: RoomData): void {
-    const chess = replay(data.moves);
+    const variant = data.variant ?? "chess";
+    const chess = variant === "xiangqi" ? replayXiangqi(data.moves) : replay(data.moves);
     const online = new Set(
       this.ctx.getWebSockets()
         .map((s) => (s.deserializeAttachment() as { color?: Color } | null)?.color)
@@ -192,6 +262,7 @@ export class Room extends DurableObject<Env> {
     );
     const payload = JSON.stringify({
       type: "state",
+      variant,
       fen: chess.fen(),
       moves: data.moves,
       turn: chess.turn(),
@@ -200,6 +271,7 @@ export class Room extends DurableObject<Env> {
       winner: data.winner,
       reason: data.reason,
       drawOffer: data.drawOffer,
+      rematchOffer: data.rematchOffer ?? null,
       players: { w: !!data.tokens.w, b: !!data.tokens.b },
       online: { w: online.has("w"), b: online.has("b") },
     });
@@ -229,6 +301,12 @@ function replay(moves: string[]): Chess {
   const chess = new Chess();
   for (const m of moves) chess.move({ from: m.slice(0, 2), to: m.slice(2, 4), promotion: m[4] });
   return chess;
+}
+
+function replayXiangqi(moves: string[]): Xiangqi {
+  const game = new Xiangqi();
+  for (const m of moves) game.move({ from: m.slice(0, 2) as any, to: m.slice(2, 4) as any });
+  return game;
 }
 
 function other(c: Color): Color {

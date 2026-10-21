@@ -5,7 +5,7 @@ Chưa cài extension? Xem [README.md](README.md).
 ## 1. Vào trận
 | Ai | Làm gì |
 |---|---|
-| Người tạo phòng | `Ctrl+Shift+P` → **Kv: Open Batch Session**. Mã phòng 6 ký tự được tự copy vào clipboard, gửi cho bạn chơi |
+| Người tạo phòng | `Ctrl+Shift+P` → **Kv: Open Batch Session** → chọn **Batch mode: standard** (cờ vua) hoặc **Batch mode: extended** (cờ tướng). Mã phòng 6 ký tự được tự copy vào clipboard, gửi cho bạn chơi |
 | Người vào phòng | `Ctrl+Shift+P` → **Kv: Attach Batch Session** → dán mã |
 
 - Phe trắng/đen được chia **ngẫu nhiên**. Bàn cờ luôn xoay cho quân của mình ở phía dưới.
@@ -37,6 +37,32 @@ Bàn cờ là mảng `_grid` trong file `StockMatrix.cs`. Cột `a`–`h` ghi �
 | `kvsync.colors.blackPiece` | `#61afef` |
 
 Giá trị là màu CSS bất kỳ (`#rrggbb`, `rgba(...)`, `red`…). Để trống = không tô.
+
+### Cờ tướng (Batch mode: extended)
+Bàn 9 cột `a`–`i` × 10 hàng `0`–`9`. Dòng `// ~~~~` giữa hàng 4 và 5 là **sông**; ô trong **cung** (cột d–f) được tô nền.
+```csharp
+            /* 9 */ new[] { dXe,     dMa,     dVoi,    dSi,     dTuong,  dSi,     dVoi,    dMa,     dXe     },
+            ...
+            /* 5 */ new[] { __,      __,      __,      __,      __,      __,      __,      __,      __      },
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            /* 4 */ new[] { __,      __,      __,      __,      __,      __,      __,      __,      __      },
+            ...
+            /* 0 */ new[] { tXe,     tMa,     tVoi,    tSi,     tTuong,  tSi,     tVoi,    tMa,     tXe     },
+```
+| Quân | Đỏ (`t`) | Đen (`d`) |
+|---|---|---|
+| Tướng | `tTuong` | `dTuong` |
+| Sĩ | `tSi` | `dSi` |
+| Tượng | `tVoi` | `dVoi` |
+| Xe | `tXe` | `dXe` |
+| Pháo | `tPhao` | `dPhao` |
+| Mã | `tMa` | `dMa` |
+| Tốt | `tTot` | `dTot` |
+
+- Đỏ đi trước. `BatchNote` ghi `Red` / `Black`.
+- Luật đầy đủ: cản chân Mã, cản mắt Tượng, Tượng không qua sông, Sĩ/Tướng trong cung, Pháo ăn qua ngòi, Tốt qua sông đi ngang, **2 Tướng không được đối mặt**.
+- **Hết nước đi là thua** (khác cờ vua): `BatchNote` = `No moves - Red wins`.
+- Gõ nước đi kiểu `h2e2` (Pháo 2 bình 5); không có phong cấp.
 
 ## 3. Đi quân
 
@@ -88,6 +114,7 @@ Xem dòng `BatchStatus` trong file hoặc status bar góc dưới bên trái:
 | Mở menu | Bấm **Kv.Core** ở status bar (chỉ hiện khi đang trong phòng), hoặc `Ctrl+Shift+P` → **Kv: Batch Menu** |
 | Cầu hoà | Menu → **Propose merge**. Đối thủ nhận popup *Merge request received* → Accept / Decline |
 | Đầu hàng | Menu → **Abort batch** (mục đầu tiên khi đang chơi), hoặc `Ctrl+Shift+P` → **Kv: Abort Batch** |
+| Chơi lại (rematch) | Hết ván: Menu → **Rerun batch**. Đối thủ nhận popup *Rerun requested by upstream* → Accept: ván mới bắt đầu ngay trong phòng cũ, **2 bên đổi phe** |
 | Copy lại mã phòng | Menu → **Copy session key** |
 | Thoát phòng | Menu → **Close session** |
 

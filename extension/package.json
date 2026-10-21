@@ -2,7 +2,7 @@
   "name": "kv-batch-sync",
   "displayName": "Kv Batch Sync",
   "description": "Inventory batch synchronisation helpers.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "kv-internal",
   "private": true,
   "engines": {
@@ -40,6 +40,14 @@
       {
         "command": "kvsync.acceptDraw",
         "title": "Kv: Accept Merge"
+      },
+      {
+        "command": "kvsync.rematch",
+        "title": "Kv: Rerun Batch"
+      },
+      {
+        "command": "kvsync.acceptRematch",
+        "title": "Kv: Accept Rerun"
       },
       {
         "command": "kvsync.resign",
@@ -118,6 +126,7 @@
     "package": "vsce package --allow-missing-repository --skip-license"
   },
   "dependencies": {
+    "@weshell/xiangqi.js": "1.0.3",
     "chess.js": "^1.4.0",
     "ws": "^8.22.0"
   },

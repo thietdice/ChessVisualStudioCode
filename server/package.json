@@ -6,6 +6,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@weshell/xiangqi.js": "1.0.3",
     "chess.js": "^1.4.0"
   },
   "devDependencies": {

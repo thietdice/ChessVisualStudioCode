@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
 import WebSocket from "ws";
-import { Color } from "./board";
+import { Color, Variant } from "./board";
 
 export type Status = "waiting" | "playing" | "checkmate" | "stalemate" | "draw" | "resigned" | "aborted";
 
 export interface StateMsg {
   type: "state";
+  variant: Variant;
   fen: string;
   moves: string[];
   turn: Color;
@@ -14,6 +15,7 @@ export interface StateMsg {
   winner: Color | null;
   reason: string | null;
   drawOffer: Color | null;
+  rematchOffer: Color | null;
   players: Record<Color, boolean>;
   online: Record<Color, boolean>;
 }
@@ -55,6 +57,7 @@ export class Session implements vscode.Disposable {
     readonly room: string,
     private intent: "create" | "join",
     private token?: string,
+    private readonly variant: Variant = "chess",
   ) {}
 
   connect(): void {
@@ -65,7 +68,7 @@ export class Session implements vscode.Disposable {
     ws.on("open", () => {
       this.retryDelay = 1000;
       this._onConnected.fire(true);
-      ws.send(JSON.stringify({ type: "hello", intent: this.intent, token: this.token }));
+      ws.send(JSON.stringify({ type: "hello", intent: this.intent, token: this.token, variant: this.variant }));
       this.pingTimer = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send("ping"), 30_000);
     });
 

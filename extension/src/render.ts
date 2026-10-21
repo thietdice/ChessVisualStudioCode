@@ -1,7 +1,10 @@
-import { Color, FILES, Grid, PieceType, squareIndex } from "./board";
+import { Color, GEOMETRY, Grid, PieceType, Variant, rankOf, squareIndex } from "./board";
 
-// Vietnamese piece names; prefix t = Trắng (White), d = Đen (Black).
-const NAME: Record<PieceType, string> = { p: "Tot", n: "Ma", b: "Tuong", r: "Xe", q: "Hau", k: "Vua" };
+// Vietnamese piece names; prefix t = Trắng/Red, d = Đen/Black.
+const NAME: Record<Variant, Partial<Record<PieceType, string>>> = {
+  chess: { p: "Tot", n: "Ma", b: "Tuong", r: "Xe", q: "Hau", k: "Vua" },
+  xiangqi: { k: "Tuong", a: "Si", b: "Voi", r: "Xe", c: "Phao", n: "Ma", p: "Tot" },
+};
 const SIDE: Record<Color, string> = { w: "t", b: "d" };
 const EMPTY = "__";
 
@@ -16,6 +19,7 @@ const HIDDEN_WIDTH = 4;
 const HIDDEN_STRIDE = 6;
 
 export interface RenderInput {
+  variant: Variant;
   grid: Grid;
   orientation: Color;
   sessionKey: string;
@@ -35,6 +39,7 @@ export interface Layout {
 }
 
 export function render(input: RenderInput): Layout {
+  const geo = GEOMETRY[input.variant];
   const rng = seeded(input.sessionKey);
   const filler = shuffle(FILLER, rng);
   const lines: string[] = [];
@@ -51,26 +56,32 @@ export function render(input: RenderInput): Layout {
   const rowStep = input.hidden ? 1 : ROW_STEP;
   const rowPrefix = (label: string) => `${ROW_INDENT}/* ${label} */ new[] { `;
   const cellStart = rowPrefix("0").length;
-  const files = input.orientation === "w" ? [...Array(8).keys()] : [...Array(8).keys()].reverse();
-  const rows = input.orientation === "w" ? [...Array(8).keys()] : [...Array(8).keys()].reverse();
+  const fileIdx = [...Array(geo.files.length).keys()];
+  const rowIdx = [...Array(geo.ranks).keys()];
+  const files = input.orientation === "w" ? fileIdx : fileIdx.reverse();
+  const rows = input.orientation === "w" ? rowIdx : rowIdx.reverse();
+  const last = files.length - 1;
 
   const letterAt = input.hidden ? 3 : 2;
   let header = `${INDENT}//`.padEnd(cellStart, " ");
-  for (const f of files) header += (" ".repeat(letterAt) + (input.hidden ? " " : FILES[f])).padEnd(stride, " ");
+  for (const f of files) header += (" ".repeat(letterAt) + (input.hidden ? " " : geo.files[f])).padEnd(stride, " ");
   lines.push(header.trimEnd());
   lines.push(`${INDENT}private static readonly ${input.hidden ? "int" : "Cell"}[][] _grid =`);
   lines.push(`${INDENT}{`);
 
   const gridTop = lines.length;
+  // Xiangqi river sits between the two halves, drawn on the spacer line.
+  const riverAfter = input.variant === "xiangqi" && !input.hidden ? geo.ranks / 2 - 1 : -1;
+  const river = `${ROW_INDENT}// ${"~".repeat(cellStart - ROW_INDENT.length - 3 + stride * last + width - 1)}`;
   rows.forEach((r, i) => {
-    if (i > 0 && rowStep > 1) lines.push("");
+    if (i > 0 && rowStep > 1) lines.push(i - 1 === riverAfter ? river : "");
     const cells = files.map((f) => {
       if (input.hidden) return hex(Math.floor(rng() * 0x40));
-      const p = input.grid[r][f];
-      return p ? SIDE[p.color] + NAME[p.type] : EMPTY;
+      const p = input.grid[r]?.[f];
+      return p ? SIDE[p.color] + (NAME[input.variant][p.type] ?? p.type) : EMPTY;
     });
-    const body = cells.map((c, j) => (j < 7 ? (c + ",").padEnd(stride, " ") : c.padEnd(width, " "))).join("");
-    const label = input.hidden ? String(i) : String(8 - r);
+    const body = cells.map((c, j) => (j < last ? (c + ",").padEnd(stride, " ") : c.padEnd(width, " "))).join("");
+    const label = input.hidden ? String(i) : String(rankOf(geo, r));
     lines.push(`${rowPrefix(label)}${body} },`);
   });
   lines.push(`${INDENT}};`);
@@ -82,7 +93,7 @@ export function render(input: RenderInput): Layout {
     );
   } else {
     // Piece legend, disguised as an enum.
-    const names = Object.values(NAME);
+    const names = Object.values(NAME[input.variant]);
     lines.push(
       `${INDENT}private enum Cell { ${[EMPTY, ...names.map((n) => SIDE.w + n), ...names.map((n) => SIDE.b + n)].join(", ")} }`,
     );
@@ -104,7 +115,7 @@ export function render(input: RenderInput): Layout {
     text: lines.join("\n"),
     pendingLine,
     squarePos(square) {
-      const { file, row } = squareIndex(square);
+      const { file, row } = squareIndex(geo, square);
       return {
         line: gridTop + rows.indexOf(row) * rowStep,
         ch: cellStart + files.indexOf(file) * stride,
@@ -115,8 +126,8 @@ export function render(input: RenderInput): Layout {
       if ((line - gridTop) % rowStep !== 0) return undefined;
       const i = (line - gridTop) / rowStep;
       const j = Math.floor((ch - cellStart) / stride);
-      if (i < 0 || i > 7 || ch < cellStart || j < 0 || j > 7) return undefined;
-      return FILES[files[j]] + (8 - rows[i]);
+      if (i < 0 || i >= rows.length || ch < cellStart || j < 0 || j > last) return undefined;
+      return geo.files[files[j]] + rankOf(geo, rows[i]);
     },
   };
 }
