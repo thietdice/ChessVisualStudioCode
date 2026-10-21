@@ -7,12 +7,13 @@ Chơi cờ vua 2 người ngay trong VS Code. Bàn cờ được ngụy trang th
 | `server/` | Relay server chạy trên Cloudflare Workers + Durable Objects (gói miễn phí là đủ) |
 | `extension/` | VS Code extension, tên hiển thị **Kv Batch Sync** |
 | `.github/workflows/deploy-relay.yml` | Tự deploy server khi push thay đổi trong `server/` |
+| `.github/workflows/release-extension.yml` | Tự build `.vsix` và tạo GitHub Release khi push `extension/` với `version` mới |
 
 👉 **Cách chơi: xem [PLAY.md](PLAY.md)**
 
 Có 2 trường hợp:
-- **Muốn chơi với nhóm của mình** (cách nên làm): một người trong nhóm tự dựng server trên tài khoản Cloudflare của họ, làm đủ cả 2 phần, rồi gửi file `.vsix` (đã gắn sẵn URL ở bước 1.7) cho những người còn lại.
-- **Được người khác gửi sẵn file `.vsix`**: chỉ cần làm [2.2](#22-cài-vào-vs-code) và [2.4](#24-nạp-lại-vs-code). Nếu file chưa gắn sẵn URL, đặt `kvsync.endpoint` theo URL người đó đưa ([2.3](#23-cấu-hình)).
+- **Muốn chơi với nhóm của mình** (cách nên làm): một người trong nhóm tự dựng server trên tài khoản Cloudflare của họ, làm đủ cả 2 phần, rồi gửi link tab **Releases** của repo (hoặc file `.vsix`) cho những người còn lại.
+- **Được người khác gửi link Releases hoặc file `.vsix`**: tải file `.vsix`, rồi chỉ cần làm [2.2](#22-cài-vào-vs-code) và [2.4](#24-nạp-lại-vs-code). Nếu file chưa gắn sẵn URL, đặt `kvsync.endpoint` theo URL người đó đưa ([2.3](#23-cấu-hình)).
 
 Repo không kèm server dùng chung: mặc định extension trỏ về `http://127.0.0.1:8787`, mỗi nhóm tự deploy server riêng (gói Cloudflare miễn phí là đủ).
 
@@ -95,7 +96,16 @@ rồi build lại extension (Phần 2).
 
 ## Phần 2 — Build và cài extension
 
-### 2.1. Build ra file `.vsix`
+### 2.1. Lấy file `.vsix`
+**Cách 1 — tải từ Releases (khỏi build):** vào tab **Releases** của repo, tải file `kv-batch-sync-<version>.vsix` ở bản mới nhất.
+
+Release được tạo tự động bởi [`.github/workflows/release-extension.yml`](.github/workflows/release-extension.yml) mỗi khi push thay đổi trong `extension/` lên `main` **và đã tăng `version`** trong [`extension/package.json`](extension/package.json) (cùng version thì bỏ qua, không tạo release trùng).
+
+Để file trong release trỏ sẵn về server của bạn (người chơi khỏi đặt `kvsync.endpoint`): repo → **Settings → Secrets and variables → Actions → tab Variables → New repository variable**, tên `KVSYNC_ENDPOINT`, giá trị là URL server (ví dụ `https://chess-relay.tenban.workers.dev`). Không đặt thì file trỏ về `http://127.0.0.1:8787`.
+
+> Repo public thì ai cũng tải được release, tức là ai cũng thấy URL server nếu bạn đặt `KVSYNC_ENDPOINT`. Gói Cloudflare miễn phí không bị tính tiền, nhưng người lạ có thể dùng chung hạn mức. Muốn kín thì để repo private, hoặc không đặt biến này và gửi URL riêng cho nhóm.
+
+**Cách 2 — tự build:**
 ```powershell
 git clone https://github.com/<user>/<repo>.git
 cd <repo>\extension
@@ -103,7 +113,7 @@ npm ci
 npm run compile
 npm run package          # tạo kv-batch-sync-0.2.0.vsix trong thư mục extension
 ```
-File `.vsix` không được commit lên repo (đã nằm trong `.gitignore`). Người chơi cùng không cần build, chỉ cần bạn gửi họ file này.
+File `.vsix` không được commit lên repo (đã nằm trong `.gitignore`).
 
 ### 2.2. Cài vào VS Code
 - Extensions (`Ctrl+Shift+X`) → nút `...` góc trên → **Install from VSIX...** → chọn file `.vsix`

@@ -1,0 +1,71 @@
+name: Release extension
+
+on:
+  push:
+    branches: [main]
+    paths: ["extension/**", ".github/workflows/release-extension.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      # One release per version: bump "version" in extension/package.json to publish a new one.
+      - name: Check version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="extension-v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag already exists, bump the version to publish a new one."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Optional repo variable (Settings → Secrets and variables → Actions → Variables).
+      # When set, the released .vsix points at that relay so players need no setup.
+      - name: Bake relay endpoint
+        if: steps.version.outputs.exists != 'true' && vars.KVSYNC_ENDPOINT != ''
+        env:
+          ENDPOINT: ${{ vars.KVSYNC_ENDPOINT }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.contributes.configuration.properties["kvsync.endpoint"].default = process.env.ENDPOINT;
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          '
+
+      - name: Build
+        if: steps.version.outputs.exists != 'true'
+        run: |
+          npm ci
+          npm run compile
+          npm run package
+
+      - name: Publish release
+        if: steps.version.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "kv-batch-sync-${{ steps.version.outputs.version }}.vsix" \
+            --title "Extension ${{ steps.version.outputs.version }}" \
+            --target "${{ github.sha }}" \
+            --generate-notes
