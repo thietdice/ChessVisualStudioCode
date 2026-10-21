@@ -14,41 +14,41 @@ Chưa cài extension? Xem [README.md](README.md).
 ## 2. Đọc bàn cờ
 Bàn cờ là mảng `_grid` trong file `StockMatrix.cs`. Cột `a`–`h` ghi ở dòng comment phía trên, số hàng ghi trong `/* 8 */`:
 ```csharp
-        //                       a     b     c     d     e     f     g     h
-        private static readonly int[][] _grid =
+        //                       a        b        c        d        e        f        g        h
+        private static readonly Cell[][] _grid =
         {
-            /* 8 */ new[] { 0x1C, 0x1A, 0x1B, 0x1E, 0x1F, 0x1B, 0x1A, 0x1C },
-            /* 7 */ new[] { 0x19, 0x19, 0x19, 0x19, 0x19, 0x19, 0x19, 0x19 },
-            /* 6 */ new[] {   __,   __,   __,   __,   __,   __,   __,   __ },
+            /* 8 */ new[] { bRook,   bKnight, bBishop, bQueen,  bKing,   bBishop, bKnight, bRook   },
+
+            /* 7 */ new[] { bPawn,   bPawn,   bPawn,   bPawn,   bPawn,   bPawn,   bPawn,   bPawn   },
+
+            /* 6 */ new[] { __,      __,      __,      __,      __,      __,      __,      __      },
             ...
-            /* 1 */ new[] { 0x0C, 0x0A, 0x0B, 0x0E, 0x0F, 0x0B, 0x0A, 0x0C },
+            /* 1 */ new[] { wRook,   wKnight, wBishop, wQueen,  wKing,   wBishop, wKnight, wRook   },
         };
-
-        // high nibble: 0x0_ = White, 0x1_ = Black
-        private enum CellKind { Pawn = 0x9, Knight = 0xA, Bishop = 0xB, Rook = 0xC, Queen = 0xE, King = 0xF }
 ```
+- Tiền tố `w` = Trắng, `b` = Đen; `__` = ô trống. Tên quân: `Pawn` (Tốt), `Knight` (Mã), `Bishop` (Tượng), `Rook` (Xe), `Queen` (Hậu), `King` (Vua).
+- Ô tối được tô nền xen kẽ, quân trắng chữ vàng, quân đen chữ xanh. Đổi màu trong Settings (`Ctrl+,` → `kvsync.colors`):
 
-| Quân | Trắng | Đen |
-|---|---|---|
-| Tốt (Pawn) | `0x09` | `0x19` |
-| Mã (Knight) | `0x0A` | `0x1A` |
-| Tượng (Bishop) | `0x0B` | `0x1B` |
-| Xe (Rook) | `0x0C` | `0x1C` |
-| Hậu (Queen) | `0x0E` | `0x1E` |
-| Vua (King) | `0x0F` | `0x1F` |
-| Ô trống | `__` | |
+| Setting | Mặc định |
+|---|---|
+| `kvsync.colors.enabled` | `true` (bỏ tick để tắt toàn bộ màu) |
+| `kvsync.colors.darkSquare` | `rgba(128, 128, 128, 0.18)` |
+| `kvsync.colors.whitePiece` | `#e5c07b` |
+| `kvsync.colors.blackPiece` | `#61afef` |
 
-Chú thích `CellKind` ngay dưới bàn cờ: số đầu `0` = trắng, `1` = đen; chữ cuối tra trong enum.
+Giá trị là màu CSS bất kỳ (`#rrggbb`, `rgba(...)`, `red`…). Để trống = không tô.
 
 ## 3. Đi quân
 
 **Cách 1 — phím tắt**
-1. Đặt con trỏ vào ô quân của mình → `Ctrl+Alt+M` (ô được viền).
-2. Đặt con trỏ vào ô đích → `Ctrl+Alt+M`.
+1. Đặt con trỏ vào ô quân của mình → `Space` (ô được viền).
+2. Đặt con trỏ vào ô đích → `Space`.
+
+`Space` chỉ có tác dụng trong file bàn cờ; `Ctrl+Alt+M` vẫn dùng được.
 
 - Khi chọn quân, các ô quân đó **đi được hợp lệ** sẽ được tô nền + viền chấm (giống highlight kết quả tìm kiếm). Gợi ý hiện cả khi đang chờ đối thủ đi, để tính trước nước.
 - Nhấn lại ô đang chọn để bỏ chọn; nhấn quân khác của mình để đổi quân.
-- Con trỏ phải nằm trên chính ô (`0x0C`, `__`), không phải dấu phẩy hay khoảng trắng.
+- Con trỏ đặt ở bất kỳ đâu trong tên quân (`wKnight`) hoặc khoảng trống ngay sau nó đều được; dòng trống giữa các hàng không tính.
 
 **Cách 2 — gõ nước đi** vào dòng `PendingBatch` rồi `Ctrl+S`:
 ```csharp
@@ -70,7 +70,10 @@ Xem dòng `BatchStatus` trong file hoặc status bar góc dưới bên trái:
 | `Merged` | `built with warnings` | Hoà |
 
 - **Nước vừa đi:** 2 ô được tô nền, cuối dòng có ghi chú kiểu git blame (`dev-team, 2 minutes ago • fix: adjust batch e7e5`).
-- **Bị chiếu:** gạch vàng `CS0618` dưới quân vua.
+- **Chiếu tướng / kết quả:** dòng `BatchNote` ngay dưới `BatchStatus`:
+  - `"White in check"` / `"Black in check"`: bên đó đang bị chiếu (bên bị chiếu còn thấy gạch vàng `CS0618` dưới vua)
+  - `"Checkmate - White wins"`, `"White resigned - Black wins"`
+  - `"Draw - stalemate"`, `"Draw - agreement"`, `"Draw - threefold repetition"`, `"Draw - insufficient material"`, `"Draw - fifty moves"`
 - **Lỗi** — gạch đỏ ở dòng `PendingBatch`:
   - `CS1503`: nước đi không hợp lệ
   - `CS4014`: chưa tới lượt
@@ -80,11 +83,11 @@ Xem dòng `BatchStatus` trong file hoặc status bar góc dưới bên trái:
 ## 5. Phím tắt & menu
 | Thao tác | Cách làm |
 |---|---|
-| Chọn / đi quân | `Ctrl+Alt+M` |
-| Ẩn / hiện bàn cờ khẩn cấp | `Ctrl+Alt+H` (bàn cờ thành số hex ngẫu nhiên) |
+| Chọn / đi quân | `Space` (hoặc `Ctrl+Alt+M`) |
+| Ẩn / hiện bàn cờ khẩn cấp | `Ctrl+Alt+H` (bàn cờ thành số hex ngẫu nhiên, tắt hết màu và `BatchNote`) |
 | Mở menu | Bấm **Kv.Core** ở status bar (chỉ hiện khi đang trong phòng), hoặc `Ctrl+Shift+P` → **Kv: Batch Menu** |
 | Cầu hoà | Menu → **Propose merge**. Đối thủ nhận popup *Merge request received* → Accept / Decline |
-| Xin thua | Menu → **Abort batch** |
+| Đầu hàng | Menu → **Abort batch** (mục đầu tiên khi đang chơi), hoặc `Ctrl+Shift+P` → **Kv: Abort Batch** |
 | Copy lại mã phòng | Menu → **Copy session key** |
 | Thoát phòng | Menu → **Close session** |
 
@@ -95,7 +98,7 @@ Xem dòng `BatchStatus` trong file hoặc status bar góc dưới bên trái:
 |---|---|
 | Chọn được quân nhưng không đi được, lỗi `CS0162` | Chưa đủ 2 người trong phòng |
 | Status bar chỉ có icon xoay mãi | Không kết nối được server: kiểm tra `kvsync.endpoint`, hoặc mạng chặn `workers.dev` |
-| `Ctrl+Alt+M` không phản hồi | Thử `Ctrl+Shift+P` → **Kv: Mark Batch Cell**. Nếu chạy được thì phím đang bị chiếm (Unikey/EVKey…): tắt bộ gõ, hoặc đổi phím tại `Ctrl+K Ctrl+S` → `kvsync.mark` |
+| `Space` / `Ctrl+Alt+M` không phản hồi | Thử `Ctrl+Shift+P` → **Kv: Mark Batch Cell**. Nếu chạy được thì phím đang bị chiếm (Unikey/EVKey…): tắt bộ gõ, hoặc đổi phím tại `Ctrl+K Ctrl+S` → `kvsync.mark` |
 | `Session ... not found` | Sai mã phòng |
 | `Session ... is locked by another process` | Phòng đã đủ 2 người |
 

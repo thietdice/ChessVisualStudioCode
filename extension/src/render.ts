@@ -1,18 +1,25 @@
 import { Color, FILES, Grid, PieceType, squareIndex } from "./board";
 
-// Piece codes: high nibble 0 = white, 1 = black; low nibble 9..F = p n b r _ q k.
-const CODE: Record<PieceType, number> = { p: 0x9, n: 0xa, b: 0xb, r: 0xc, q: 0xe, k: 0xf };
+const NAME: Record<PieceType, string> = { p: "Pawn", n: "Knight", b: "Bishop", r: "Rook", q: "Queen", k: "King" };
+const EMPTY = "__";
 
 const INDENT = "        ";
 const ROW_INDENT = "            ";
-const CELL_WIDTH = 4;
-const CELL_STRIDE = 6; // "0x1C, "
+// Visible board: "wKnight, " per cell, with a blank line between ranks so cells look less flat.
+const CELL_WIDTH = 7;
+const CELL_STRIDE = 9;
+const ROW_STEP = 2;
+// Hidden board keeps the compact hex look: "0x1C, ".
+const HIDDEN_WIDTH = 4;
+const HIDDEN_STRIDE = 6;
 
 export interface RenderInput {
   grid: Grid;
   orientation: Color;
   sessionKey: string;
   status: string;
+  /** Check / game-result line, empty when there is nothing to report. */
+  note: string;
   hidden: boolean;
 }
 
@@ -37,36 +44,50 @@ export function render(input: RenderInput): Layout {
   push(filler[1]);
   lines.push("");
 
+  const width = input.hidden ? HIDDEN_WIDTH : CELL_WIDTH;
+  const stride = input.hidden ? HIDDEN_STRIDE : CELL_STRIDE;
+  const rowStep = input.hidden ? 1 : ROW_STEP;
   const rowPrefix = (label: string) => `${ROW_INDENT}/* ${label} */ new[] { `;
   const cellStart = rowPrefix("0").length;
   const files = input.orientation === "w" ? [...Array(8).keys()] : [...Array(8).keys()].reverse();
   const rows = input.orientation === "w" ? [...Array(8).keys()] : [...Array(8).keys()].reverse();
 
+  const letterAt = input.hidden ? 3 : 2;
   let header = `${INDENT}//`.padEnd(cellStart, " ");
-  for (const f of files) header += (" ".repeat(3) + (input.hidden ? " " : FILES[f])).padEnd(CELL_STRIDE, " ");
+  for (const f of files) header += (" ".repeat(letterAt) + (input.hidden ? " " : FILES[f])).padEnd(stride, " ");
   lines.push(header.trimEnd());
-  lines.push(`${INDENT}private static readonly int[][] _grid =`);
+  lines.push(`${INDENT}private static readonly ${input.hidden ? "int" : "Cell"}[][] _grid =`);
   lines.push(`${INDENT}{`);
 
   const gridTop = lines.length;
   rows.forEach((r, i) => {
+    if (i > 0 && rowStep > 1) lines.push("");
     const cells = files.map((f) => {
       if (input.hidden) return hex(Math.floor(rng() * 0x40));
       const p = input.grid[r][f];
-      return p ? hex((p.color === "b" ? 0x10 : 0) | CODE[p.type]) : "  __";
+      return p ? p.color + NAME[p.type] : EMPTY;
     });
+    const body = cells.map((c, j) => (j < 7 ? (c + ",").padEnd(stride, " ") : c.padEnd(width, " "))).join("");
     const label = input.hidden ? String(i) : String(8 - r);
-    lines.push(`${rowPrefix(label)}${cells.join(", ")} },`);
+    lines.push(`${rowPrefix(label)}${body} },`);
   });
   lines.push(`${INDENT}};`);
   lines.push("");
-  // Piece legend, disguised as an enum; high nibble 0 = white, 1 = black.
-  lines.push(`${INDENT}// high nibble: 0x0_ = White, 0x1_ = Black`);
-  lines.push(
-    `${INDENT}private enum CellKind { Pawn = 0x9, Knight = 0xA, Bishop = 0xB, Rook = 0xC, Queen = 0xE, King = 0xF }`,
-  );
+  if (input.hidden) {
+    lines.push(`${INDENT}// high nibble: 0x0_ = White, 0x1_ = Black`);
+    lines.push(
+      `${INDENT}private enum CellKind { Pawn = 0x9, Knight = 0xA, Bishop = 0xB, Rook = 0xC, Queen = 0xE, King = 0xF }`,
+    );
+  } else {
+    // Piece legend, disguised as an enum; prefix w = White, b = Black.
+    const names = Object.values(NAME);
+    lines.push(
+      `${INDENT}private enum Cell { ${[EMPTY, ...names.map((n) => "w" + n), ...names.map((n) => "b" + n)].join(", ")} }`,
+    );
+  }
   lines.push("");
   lines.push(`${INDENT}private const string BatchStatus = "${input.status}";`);
+  lines.push(`${INDENT}private const string BatchNote = "${input.hidden ? "" : input.note}";`);
   const pendingLine = lines.length;
   lines.push(`${INDENT}private const string PendingBatch = "";`);
   lines.push("");
@@ -83,14 +104,15 @@ export function render(input: RenderInput): Layout {
     squarePos(square) {
       const { file, row } = squareIndex(square);
       return {
-        line: gridTop + rows.indexOf(row),
-        ch: cellStart + files.indexOf(file) * CELL_STRIDE,
-        width: CELL_WIDTH,
+        line: gridTop + rows.indexOf(row) * rowStep,
+        ch: cellStart + files.indexOf(file) * stride,
+        width,
       };
     },
     squareAt(line, ch) {
-      const i = line - gridTop;
-      const j = Math.floor((ch - cellStart) / CELL_STRIDE);
+      if ((line - gridTop) % rowStep !== 0) return undefined;
+      const i = (line - gridTop) / rowStep;
+      const j = Math.floor((ch - cellStart) / stride);
       if (i < 0 || i > 7 || ch < cellStart || j < 0 || j > 7) return undefined;
       return FILES[files[j]] + (8 - rows[i]);
     },
@@ -138,7 +160,6 @@ namespace Kv.Core.Services.Inventory
     /// </summary>
     internal static class StockMatrix
     {
-        private const int __ = 0x00;
         private const string SessionKey = "{KEY}";
         private static readonly ICacheClient _cache = CacheFactory.Default;
 `;

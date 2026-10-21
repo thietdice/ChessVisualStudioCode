@@ -2,7 +2,7 @@
   "name": "kv-batch-sync",
   "displayName": "Kv Batch Sync",
   "description": "Inventory batch synchronisation helpers.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "kv-internal",
   "private": true,
   "engines": {
@@ -61,6 +61,11 @@
     "keybindings": [
       {
         "command": "kvsync.mark",
+        "key": "space",
+        "when": "editorTextFocus && resourceScheme == kvsrc"
+      },
+      {
+        "command": "kvsync.mark",
         "key": "ctrl+alt+m",
         "mac": "cmd+alt+m",
         "when": "editorTextFocus && resourceScheme == kvsrc"
@@ -83,6 +88,26 @@
           "type": "string",
           "default": "dev-team",
           "description": "Author name shown for upstream changes."
+        },
+        "kvsync.colors.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Colour the board squares and pieces."
+        },
+        "kvsync.colors.darkSquare": {
+          "type": "string",
+          "default": "rgba(128, 128, 128, 0.18)",
+          "description": "Background of dark squares (CSS colour)."
+        },
+        "kvsync.colors.whitePiece": {
+          "type": "string",
+          "default": "#e5c07b",
+          "description": "Text colour of White pieces (CSS colour)."
+        },
+        "kvsync.colors.blackPiece": {
+          "type": "string",
+          "default": "#61afef",
+          "description": "Text colour of Black pieces (CSS colour)."
         }
       }
     }

@@ -11,8 +11,10 @@ Chơi cờ vua 2 người ngay trong VS Code. Bàn cờ được ngụy trang th
 👉 **Cách chơi: xem [PLAY.md](PLAY.md)**
 
 Có 2 trường hợp:
-- **Chỉ muốn chơi** với người đã có server: bỏ qua Phần 1, làm từ [Phần 2](#phần-2--build-và-cài-extension), dùng endpoint họ đưa cho bạn (server hiện tại: `https://chess-relay.thietdice.workers.dev`).
-- **Muốn tự dựng server riêng** (fork/clone về repo của bạn): làm đủ cả 2 phần.
+- **Muốn chơi với nhóm của mình** (cách nên làm): một người trong nhóm tự dựng server trên tài khoản Cloudflare của họ, làm đủ cả 2 phần, rồi gửi file `.vsix` (đã gắn sẵn URL ở bước 1.7) cho những người còn lại.
+- **Được người khác gửi sẵn file `.vsix`**: chỉ cần làm [2.2](#22-cài-vào-vs-code) và [2.4](#24-nạp-lại-vs-code). Nếu file chưa gắn sẵn URL, đặt `kvsync.endpoint` theo URL người đó đưa ([2.3](#23-cấu-hình)).
+
+Repo không kèm server dùng chung: mặc định extension trỏ về `http://127.0.0.1:8787`, mỗi nhóm tự deploy server riêng (gói Cloudflare miễn phí là đủ).
 
 ---
 
@@ -87,6 +89,8 @@ Mặc định extension trỏ về `http://127.0.0.1:8787` (server chạy local)
 ```
 rồi build lại extension (Phần 2).
 
+> Nếu repo của bạn để public, **đừng commit** thay đổi này: chỉ sửa tạm để build file `.vsix` gửi cho nhóm, sau đó `git checkout extension/package.json`. Như vậy người lạ clone repo về sẽ không dùng chung hạn mức Cloudflare của bạn.
+
 ---
 
 ## Phần 2 — Build và cài extension
@@ -97,13 +101,13 @@ git clone https://github.com/<user>/<repo>.git
 cd <repo>\extension
 npm ci
 npm run compile
-npm run package          # tạo kv-batch-sync-0.1.0.vsix trong thư mục extension
+npm run package          # tạo kv-batch-sync-0.2.0.vsix trong thư mục extension
 ```
 File `.vsix` không được commit lên repo (đã nằm trong `.gitignore`). Người chơi cùng không cần build, chỉ cần bạn gửi họ file này.
 
 ### 2.2. Cài vào VS Code
 - Extensions (`Ctrl+Shift+X`) → nút `...` góc trên → **Install from VSIX...** → chọn file `.vsix`
-- hoặc: `code --install-extension kv-batch-sync-0.1.0.vsix`
+- hoặc: `code --install-extension kv-batch-sync-0.2.0.vsix`
 
 Cài bản mới đè lên bản cũ cũng làm y như vậy.
 
@@ -112,7 +116,8 @@ Cài bản mới đè lên bản cũ cũng làm y như vậy.
 
 | Setting | Giá trị |
 |---|---|
-| `kvsync.endpoint` | URL server, ví dụ `https://chess-relay.thietdice.workers.dev` (bỏ qua nếu đã làm bước 1.7) |
+| `kvsync.endpoint` | URL server của nhóm bạn, ví dụ `https://chess-relay.tenban.workers.dev` (bỏ qua nếu file `.vsix` đã gắn sẵn ở bước 1.7) |
+| `kvsync.colors.*` | Bật/tắt và đổi màu ô tối, quân trắng, quân đen (xem [PLAY.md](PLAY.md#2-đọc-bàn-cờ)) |
 | `kvsync.author` | Tên hiển thị của đối thủ trong dòng "blame" (tuỳ chọn) |
 
 ### 2.4. Nạp lại VS Code

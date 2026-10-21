@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { Chess } from "chess.js";
-import { Color, findKing, parseFen, pieceAt } from "./board";
+import { Color, findKing, parseFen, pieceAt, squareName } from "./board";
 import { FILE_URI, MatrixFileSystem, SCHEME } from "./fs";
 import { ErrorMsg, Session, StateMsg } from "./net";
 import { Layout, parsePending, render } from "./render";
@@ -10,6 +10,7 @@ const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const UCI = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
 const TOKENS_KEY = "kvsync.tokens";
 const LAST_ROOM_KEY = "kvsync.lastRoom";
+const SIDE = { w: "White", b: "Black" } as const;
 
 // Server error codes rendered as compiler diagnostics on the PendingBatch line.
 const ERROR_TEXT: Record<string, string> = {
@@ -71,6 +72,7 @@ class Controller implements vscode.Disposable {
   private readonly blameDeco = vscode.window.createTextEditorDecorationType({
     after: { color: new vscode.ThemeColor("editorCodeLens.foreground"), fontStyle: "italic", margin: "0 0 0 3em" },
   });
+  private boardDecos = createBoardDecos();
   private readonly blameTimer = setInterval(() => this.decorate(), 30_000);
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
@@ -86,6 +88,12 @@ class Controller implements vscode.Disposable {
       vscode.window.onDidChangeVisibleTextEditors(() => this.decorate()),
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.document.uri.toString() === FILE_URI.toString()) this.decorate();
+      }),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (!e.affectsConfiguration("kvsync.colors")) return;
+        disposeBoardDecos(this.boardDecos);
+        this.boardDecos = createBoardDecos();
+        this.decorate();
       }),
     );
   }
@@ -152,13 +160,18 @@ class Controller implements vscode.Disposable {
 
   async menu(): Promise<void> {
     const offeredToMe = this.state?.drawOffer && this.state.drawOffer !== this.color;
+    const playing = this.state?.status === "playing";
     const items: (vscode.QuickPickItem & { cmd: string })[] = [
+      ...(playing
+        ? [
+            { label: "$(circle-slash) Abort batch", description: "resign", cmd: "kvsync.resign" },
+            offeredToMe
+              ? { label: "$(git-merge) Accept merge request", description: "accept draw", cmd: "kvsync.acceptDraw" }
+              : { label: "$(git-pull-request) Propose merge", description: "offer draw", cmd: "kvsync.offerDraw" },
+          ]
+        : []),
       { label: "$(copy) Copy session key", description: this.session?.room, cmd: "kvsync.copyKey" },
-      ...(offeredToMe
-        ? [{ label: "$(git-merge) Accept merge request", cmd: "kvsync.acceptDraw" }]
-        : [{ label: "$(git-pull-request) Propose merge", cmd: "kvsync.offerDraw" }]),
       { label: "$(eye-closed) Toggle preview", cmd: "kvsync.toggle" },
-      { label: "$(circle-slash) Abort batch", cmd: "kvsync.resign" },
       { label: "$(close) Close session", cmd: "kvsync.close" },
     ];
     const pick = await vscode.window.showQuickPick(items, { placeHolder: "Kv.Core" });
@@ -179,6 +192,7 @@ class Controller implements vscode.Disposable {
 
   dispose(): void {
     clearInterval(this.blameTimer);
+    disposeBoardDecos(this.boardDecos);
     this.session?.dispose();
   }
 
@@ -258,9 +272,10 @@ class Controller implements vscode.Disposable {
         });
     }
     if (s.status !== "playing" && s.status !== "waiting" && this.once("end")) {
-      if (!s.winner) vscode.window.showWarningMessage("Build succeeded with warnings.");
-      else if (s.winner === me) vscode.window.showInformationMessage("Build succeeded.");
-      else vscode.window.showErrorMessage("Build failed: 1 error.");
+      const note = this.noteLabel();
+      if (!s.winner) vscode.window.showWarningMessage(`Build succeeded with warnings: ${note}.`);
+      else if (s.winner === me) vscode.window.showInformationMessage(`Build succeeded: ${note}.`);
+      else vscode.window.showErrorMessage(`Build failed: ${note}.`);
     }
   }
 
@@ -296,6 +311,7 @@ class Controller implements vscode.Disposable {
       orientation: this.color ?? "w",
       sessionKey: this.session?.room ?? "",
       status: this.hidden ? "Idle" : this.statusLabel(),
+      note: this.noteLabel(),
       hidden: this.hidden,
     });
     if (force || this.layout.text !== this.text) {
@@ -313,6 +329,19 @@ class Controller implements vscode.Disposable {
     if (s.status === "playing") return s.turn === this.color ? "Pending" : "Queued";
     if (!s.winner) return "Merged";
     return s.winner === this.color ? "Committed" : "RolledBack";
+  }
+
+  /** Plain-English check / result line shown as the BatchNote constant. */
+  private noteLabel(): string {
+    const s = this.state;
+    if (!s) return "";
+    if (s.status === "playing") return s.check ? `${SIDE[s.turn]} in check` : "";
+    if (s.status === "waiting") return "";
+    const reason = (s.reason ?? s.status).replace(/_/g, " ");
+    if (!s.winner) return `Draw - ${reason}`;
+    const winner = SIDE[s.winner];
+    if (s.reason === "resign") return `${SIDE[s.winner === "w" ? "b" : "w"]} resigned - ${winner} wins`;
+    return `${reason[0].toUpperCase()}${reason.slice(1)} - ${winner} wins`;
   }
 
   private updateStatusBar(): void {
@@ -391,6 +420,20 @@ class Controller implements vscode.Disposable {
     const targetRanges = show && this.selected && this.color
       ? legalTargets(s.fen, this.selected, this.color).map(cell)
       : [];
+    const darkRanges: vscode.Range[] = [];
+    const whiteRanges: vscode.Range[] = [];
+    const blackRanges: vscode.Range[] = [];
+    if (show) {
+      const grid = parseFen(s.fen);
+      for (let r = 0; r < 8; r++) {
+        for (let f = 0; f < 8; f++) {
+          const sq = squareName(f, r);
+          if ((f + r) % 2 === 1) darkRanges.push(cell(sq));
+          const p = grid[r][f];
+          if (p) (p.color === "w" ? whiteRanges : blackRanges).push(cell(sq));
+        }
+      }
+    }
     const blame: vscode.DecorationOptions[] = [];
     if (show && last) {
       const line = layout.squarePos(last.slice(2, 4)).line;
@@ -404,7 +447,11 @@ class Controller implements vscode.Disposable {
       });
     }
 
+    const colors = vscode.workspace.getConfiguration("kvsync.colors").get<boolean>("enabled", true);
     for (const e of editors) {
+      e.setDecorations(this.boardDecos.dark, colors ? darkRanges : []);
+      e.setDecorations(this.boardDecos.white, colors ? whiteRanges : []);
+      e.setDecorations(this.boardDecos.black, colors ? blackRanges : []);
       e.setDecorations(this.lastMoveDeco, lastRanges);
       e.setDecorations(this.selectedDeco, selRanges);
       e.setDecorations(this.targetDeco, targetRanges);
@@ -429,6 +476,28 @@ function legalTargets(fen: string, square: string, color: Color): string[] {
   } catch {
     return [];
   }
+}
+
+interface BoardDecos {
+  dark: vscode.TextEditorDecorationType;
+  white: vscode.TextEditorDecorationType;
+  black: vscode.TextEditorDecorationType;
+}
+
+/** Checkerboard background and piece colours, rebuilt whenever the kvsync.colors settings change. */
+function createBoardDecos(): BoardDecos {
+  const cfg = vscode.workspace.getConfiguration("kvsync.colors");
+  return {
+    dark: vscode.window.createTextEditorDecorationType({ backgroundColor: cfg.get<string>("darkSquare") }),
+    white: vscode.window.createTextEditorDecorationType({ color: cfg.get<string>("whitePiece"), fontWeight: "bold" }),
+    black: vscode.window.createTextEditorDecorationType({ color: cfg.get<string>("blackPiece"), fontWeight: "bold" }),
+  };
+}
+
+function disposeBoardDecos(d: BoardDecos): void {
+  d.dark.dispose();
+  d.white.dispose();
+  d.black.dispose();
 }
 
 function randomCode(): string {
