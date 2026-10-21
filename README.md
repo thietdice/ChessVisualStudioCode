@@ -80,10 +80,9 @@ Mẹo nhớ: số đầu `0` = trắng, `1` = đen; chữ cuối **9 A B C E F**
 
 Ngay dưới grid có sẵn chú thích, ngụy trang thành enum:
 ```csharp
-        // high nibble: 0x0_ = W, 0x1_ = B
-        private enum CellKind { P = 0x9, N = 0xA, B = 0xB, R = 0xC, Q = 0xE, K = 0xF }
+        // high nibble: 0x0_ = White, 0x1_ = Black
+        private enum CellKind { Pawn = 0x9, Knight = 0xA, Bishop = 0xB, Rook = 0xC, Queen = 0xE, King = 0xF }
 ```
-`P` Pawn (Tốt), `N` Knight (Mã), `B` Bishop (Tượng), `R` Rook (Xe), `Q` Queen (Hậu), `K` King (Vua).
 
 ### Đi quân
 **Cách 1 — phím tắt**
