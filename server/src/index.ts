@@ -1,17 +1,20 @@
 import { DurableObject } from "cloudflare:workers";
 import { Chess } from "chess.js";
 import { Chess as Xiangqi } from "@weshell/xiangqi.js";
+import { Jieqi, Layout, randomLayout } from "./jieqi";
+import { Go } from "./go";
 
 export interface Env {
   ROOMS: DurableObjectNamespace<Room>;
 }
 
 type Color = "w" | "b";
-type Variant = "chess" | "xiangqi";
-type Status = "waiting" | "playing" | "checkmate" | "stalemate" | "draw" | "resigned" | "aborted";
+type Variant = "chess" | "xiangqi" | "jieqi" | "go9" | "go13" | "go19";
+type Status = "waiting" | "playing" | "checkmate" | "stalemate" | "draw" | "resigned" | "aborted" | "scored";
 
 interface RoomData {
   variant?: Variant; // missing on rooms created before xiangqi support = chess
+  layout?: Layout; // jieqi only: what each face-down piece really is, never sent to clients
   tokens: Partial<Record<Color, string>>;
   moves: string[]; // UCI, e.g. "e2e4", "e7e8q"
   status: Status;
@@ -33,10 +36,17 @@ type ClientMsg =
   | { type: "rematch_decline" };
 
 const ROOM_CODE = /^[A-Z0-9]{4,12}$/;
+// A point like "d4" / "q16" (go boards skip "i"), or a pass. Board size is checked by the engine.
+const GO_MOVE = /^([a-hj-t]\d{1,2}|pass)$/;
 const UCI: Record<Variant, RegExp> = {
   chess: /^[a-h][1-8][a-h][1-8][qrbn]?$/,
   xiangqi: /^[a-i][0-9][a-i][0-9]$/,
+  jieqi: /^[a-i][0-9][a-i][0-9]$/,
+  go9: GO_MOVE,
+  go13: GO_MOVE,
+  go19: GO_MOVE,
 };
+const VARIANTS: Variant[] = ["chess", "xiangqi", "jieqi", "go9", "go13", "go19"];
 const IDLE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export default {
@@ -129,8 +139,9 @@ export class Room extends DurableObject<Env> {
 
     if (!data) {
       if (msg.intent !== "create") return this.sendError(ws, "not_found", true);
-      const variant: Variant = msg.variant === "xiangqi" ? "xiangqi" : "chess";
+      const variant: Variant = msg.variant && VARIANTS.includes(msg.variant) ? msg.variant : "chess";
       data = { variant, tokens: {}, moves: [], status: "waiting", winner: null, reason: null, drawOffer: null };
+      if (variant === "jieqi") data.layout = randomLayout(secureRandom);
     } else if (msg.intent === "create" && !msg.token) {
       return this.sendError(ws, "exists", true);
     }
@@ -163,6 +174,8 @@ export class Room extends DurableObject<Env> {
     const variant = data.variant ?? "chess";
     if (!UCI[variant].test(uci)) return this.sendError(ws, "bad_move");
     if (variant === "xiangqi") return this.onXiangqiMove(ws, data, color, uci);
+    if (variant === "jieqi") return this.onJieqiMove(ws, data, color, uci);
+    if (isGo(variant)) return this.onGoMove(ws, data, color, uci);
     const chess = replay(data.moves);
     if (chess.turn() !== color) return this.sendError(ws, "not_your_turn");
 
@@ -224,6 +237,51 @@ export class Room extends DurableObject<Env> {
     this.broadcast(data);
   }
 
+  private async onJieqiMove(ws: WebSocket, data: RoomData, color: Color, uci: string): Promise<void> {
+    const game = replayJieqi(data);
+    if (game.turn() !== color) return this.sendError(ws, "not_your_turn");
+
+    try {
+      game.move(uci, data.layout);
+    } catch {
+      return this.sendError(ws, "illegal_move");
+    }
+
+    data.moves.push(uci);
+    data.drawOffer = null;
+    // Like xiangqi, having no legal move loses. Draws only by agreement.
+    if (game.moves().length === 0) {
+      data.status = "checkmate";
+      data.winner = color;
+      data.reason = game.inCheck() ? "checkmate" : "no_moves";
+    }
+    await this.save(data);
+    this.broadcast(data);
+  }
+
+  private async onGoMove(ws: WebSocket, data: RoomData, color: Color, move: string): Promise<void> {
+    const game = replayGo(data);
+    if (game.turn() !== color) return this.sendError(ws, "not_your_turn");
+
+    try {
+      game.play(move);
+    } catch {
+      return this.sendError(ws, "illegal_move");
+    }
+
+    data.moves.push(move);
+    data.drawOffer = null;
+    // Two passes in a row end the game; komi is fractional so there is always a winner.
+    if (game.isOver()) {
+      const score = game.score();
+      data.status = "scored";
+      data.winner = score.w > score.b ? "w" : "b";
+      data.reason = "score";
+    }
+    await this.save(data);
+    this.broadcast(data);
+  }
+
   /** Rematch in the same room once the game is over; players swap sides. */
   private async onRematch(ws: WebSocket, data: RoomData, color: Color, type: string): Promise<void> {
     if (data.status === "playing" || data.status === "waiting") return this.sendError(ws, "not_over");
@@ -240,6 +298,7 @@ export class Room extends DurableObject<Env> {
       data.reason = null;
       data.drawOffer = null;
       data.rematchOffer = null;
+      if (data.variant === "jieqi") data.layout = randomLayout(secureRandom);
       for (const s of this.ctx.getWebSockets()) {
         const old = (s.deserializeAttachment() as { color?: Color } | null)?.color;
         if (!old) continue;
@@ -254,7 +313,9 @@ export class Room extends DurableObject<Env> {
 
   private broadcast(data: RoomData): void {
     const variant = data.variant ?? "chess";
-    const chess = variant === "xiangqi" ? replayXiangqi(data.moves) : replay(data.moves);
+    const go = isGo(variant) ? replayGo(data) : undefined;
+    const chess = go ?? (variant === "jieqi" ? replayJieqi(data)
+      : variant === "xiangqi" ? replayXiangqi(data.moves) : replay(data.moves));
     const online = new Set(
       this.ctx.getWebSockets()
         .map((s) => (s.deserializeAttachment() as { color?: Color } | null)?.color)
@@ -273,6 +334,7 @@ export class Room extends DurableObject<Env> {
       drawOffer: data.drawOffer,
       rematchOffer: data.rematchOffer ?? null,
       players: { w: !!data.tokens.w, b: !!data.tokens.b },
+      ...(go && { captures: go.captures, score: go.score() }),
       online: { w: online.has("w"), b: online.has("b") },
     });
     for (const s of this.ctx.getWebSockets()) {
@@ -307,6 +369,27 @@ function replayXiangqi(moves: string[]): Xiangqi {
   const game = new Xiangqi();
   for (const m of moves) game.move({ from: m.slice(0, 2) as any, to: m.slice(2, 4) as any });
   return game;
+}
+
+function replayJieqi(data: RoomData): Jieqi {
+  const game = new Jieqi();
+  for (const m of data.moves) game.move(m, data.layout);
+  return game;
+}
+
+function replayGo(data: RoomData): Go {
+  const game = new Go(Number((data.variant ?? "go19").slice(2)));
+  for (const m of data.moves) game.play(m);
+  return game;
+}
+
+function isGo(variant: Variant): boolean {
+  return variant.startsWith("go");
+}
+
+/** Shuffles the jieqi layout; Math.random is not good enough for a hidden-information game. */
+function secureRandom(): number {
+  return crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32;
 }
 
 function other(c: Color): Color {

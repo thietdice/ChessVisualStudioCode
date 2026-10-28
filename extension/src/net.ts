@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import WebSocket from "ws";
 import { Color, Variant } from "./board";
 
-export type Status = "waiting" | "playing" | "checkmate" | "stalemate" | "draw" | "resigned" | "aborted";
+export type Status = "waiting" | "playing" | "checkmate" | "stalemate" | "draw" | "resigned" | "aborted" | "scored";
 
 export interface StateMsg {
   type: "state";
@@ -18,6 +18,9 @@ export interface StateMsg {
   rematchOffer: Color | null;
   players: Record<Color, boolean>;
   online: Record<Color, boolean>;
+  /** Go only: stones captured by each seat, and the area score (komi included) so far. */
+  captures?: Record<Color, number>;
+  score?: Record<Color, number>;
 }
 
 export interface WelcomeMsg {

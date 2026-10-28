@@ -5,7 +5,7 @@ Chưa cài extension? Xem [README.md](README.md).
 ## 1. Vào trận
 | Ai | Làm gì |
 |---|---|
-| Người tạo phòng | `Ctrl+Shift+P` → **Kv: Open Batch Session** → chọn **Batch mode: standard** (cờ vua) hoặc **Batch mode: extended** (cờ tướng). Mã phòng 6 ký tự được tự copy vào clipboard, gửi cho bạn chơi |
+| Người tạo phòng | `Ctrl+Shift+P` → **Kv: Open Batch Session** → chọn **Batch mode: standard** (cờ vua), **Batch mode: extended** (cờ tướng), **Batch mode: lazy** (cờ úp) hoặc **Batch mode: grid** (cờ vây, chọn tiếp bàn 9 / 13 / 19). Mã phòng 6 ký tự được tự copy vào clipboard, gửi cho bạn chơi |
 | Người vào phòng | `Ctrl+Shift+P` → **Kv: Attach Batch Session** → dán mã |
 
 - Phe trắng/đen được chia **ngẫu nhiên**. Bàn cờ luôn xoay cho quân của mình ở phía dưới.
@@ -63,6 +63,38 @@ Bàn 9 cột `a`–`i` × 10 hàng `0`–`9`. Dòng `// ~~~~` giữa hàng 4 và
 - Luật đầy đủ: cản chân Mã, cản mắt Tượng, Tượng không qua sông, Sĩ/Tướng trong cung, Pháo ăn qua ngòi, Tốt qua sông đi ngang, **2 Tướng không được đối mặt**.
 - **Hết nước đi là thua** (khác cờ vua): `BatchNote` = `No moves - Red wins`.
 - Gõ nước đi kiểu `h2e2` (Pháo 2 bình 5); không có phong cấp.
+
+### Cờ úp (Batch mode: lazy)
+Bàn, tọa độ và tên quân giống cờ tướng, thêm quân úp `tUp` / `dUp`.
+```csharp
+            /* 9 */ new[] { dUp,     dUp,     dUp,     dUp,     dTuong,  dUp,     dUp,     dUp,     dUp     },
+            ...
+            /* 0 */ new[] { tUp,     tUp,     tUp,     tUp,     tTuong,  tUp,     tUp,     tUp,     tUp     },
+```
+- Chỉ **Tướng** ngửa. 15 quân còn lại mỗi bên được xáo ngẫu nhiên và úp vào các vị trí xuất phát; cả 2 người đều không biết quân nào là quân nào.
+- Quân úp **đi theo quân gốc của ô nó đứng** (úp ở ô Xe thì đi như Xe, ô Pháo đi như Pháo…). Đi xong là lật lên, từ đó đi theo đúng quân thật.
+- Sau khi lật, **Sĩ và Tượng đi khắp bàn** (không bị giới hạn trong cung / bên sông mình). Vẫn cản chân Mã, cản mắt Tượng; Tốt không đi lùi, qua sông mới được đi ngang.
+- **Ăn quân úp thì không lộ**: quân bị ăn mất luôn, không ai biết đó là quân gì.
+- Hết nước đi là thua như cờ tướng. **Hòa chỉ bằng thỏa thuận** (Propose merge), không có hòa do lặp nước.
+- Rerun batch sẽ xáo lại quân úp.
+
+### Cờ vây (Batch mode: grid)
+Bàn là mảng `byte[][]`: `00` = giao điểm trống, `01` = quân Đen, `02` = quân Trắng. Quân được tô thành **chấm tròn 2 màu** (Đen / Trắng), viên vừa đánh có viền đậm; các điểm sao được tô nền. Cột `a`–`t` **bỏ chữ `i`** như bàn cờ vây thật, hàng `1` ở dưới cùng.
+```csharp
+        //                        a   b   c   d   e   f   g   h   j
+        private static readonly byte[][] _grid =
+        {
+            /* 9 */ new byte[] { 00, 00, 00, 00, 00, 00, 00, 00, 00 },
+            /* 8 */ new byte[] { 00, 00, 00, 00, 00, 00, 00, 00, 00 },
+            /* 7 */ new byte[] { 00, 00, 01, 00, 00, 00, 02, 00, 00 },
+            ...
+```
+- Ai đi trước cầm **Đen**. `BatchNote` hiện số quân đã bắt, ví dụ `captures: Black 3, White 1`.
+- Đánh quân: con trỏ vào giao điểm trống → `Space` (chỉ 1 lần, không cần chọn quân). Hoặc gõ `PendingBatch = "d4"` rồi `Ctrl+S`.
+- **Pass:** Menu → **Skip batch**, hoặc gõ `PendingBatch = "pass"`.
+- Luật: cấm tự sát; cấm lặp lại thế cờ đã có (superko, bao gồm cướp ko ngay lập tức).
+- **Kết thúc:** 2 bên pass liên tiếp thì server tự **tính đất** = số quân trên bàn + giao điểm trống chỉ giáp quân mình; Trắng được cộng **komi 7.5**. Mọi quân còn trên bàn đều tính là sống, nên **phải bắt hết quân chết trước khi pass**. `BatchNote` = `Black 45 - White 43.5 - Black wins`.
+- Đổi màu quân: `kvsync.colors.blackStone` (mặc định `#202020`), `kvsync.colors.whiteStone` (mặc định `#f0f0f0`).
 
 ## 3. Đi quân
 

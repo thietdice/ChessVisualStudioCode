@@ -1,7 +1,12 @@
+import { START_FEN as JIEQI_START } from "./jieqi";
+
 export type Color = "w" | "b";
-export type Variant = "chess" | "xiangqi";
-/** Chess uses p n b r q k; xiangqi uses p n b(elephant) a(advisor) r c(cannon) k. */
-export type PieceType = "p" | "n" | "b" | "r" | "q" | "k" | "a" | "c";
+export type Variant = "chess" | "xiangqi" | "jieqi" | "go9" | "go13" | "go19";
+/**
+ * Chess uses p n b r q k; xiangqi uses p n b(elephant) a(advisor) r c(cannon) k; jieqi adds x (face down);
+ * go only has s (stone), where seat w plays Black.
+ */
+export type PieceType = "p" | "n" | "b" | "r" | "q" | "k" | "a" | "c" | "x" | "s";
 
 export interface Piece {
   color: Color;
@@ -21,20 +26,43 @@ export interface Geometry {
 export const GEOMETRY: Record<Variant, Geometry> = {
   chess: { files: "abcdefgh", ranks: 8, firstRank: 1 },
   xiangqi: { files: "abcdefghi", ranks: 10, firstRank: 0 },
+  jieqi: { files: "abcdefghi", ranks: 10, firstRank: 0 },
+  // Go boards skip the letter i.
+  go9: { files: "abcdefghj", ranks: 9, firstRank: 1 },
+  go13: { files: "abcdefghjklmn", ranks: 13, firstRank: 1 },
+  go19: { files: "abcdefghjklmnopqrst", ranks: 19, firstRank: 1 },
 };
 
 export const START_FEN: Record<Variant, string> = {
   chess: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
   xiangqi: "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+  jieqi: JIEQI_START,
+  go9: emptyGo(9),
+  go13: emptyGo(13),
+  go19: emptyGo(19),
 };
+
+export function isGo(variant: Variant): boolean {
+  return variant.startsWith("go");
+}
+
+/** Xiangqi and jieqi share the board: river, palaces, Red/Black. */
+export function isXiangqiBoard(variant: Variant): boolean {
+  return variant === "xiangqi" || variant === "jieqi";
+}
+
+function emptyGo(size: number): string {
+  return `${Array(size).fill(size).join("/")} w`;
+}
 
 export function parseFen(fen: string): Grid {
   const rows = fen.split(" ")[0].split("/");
   return rows.map((row) => {
     const cells: (Piece | null)[] = [];
-    for (const ch of row) {
-      if (/\d/.test(ch)) {
-        for (let i = 0; i < Number(ch); i++) cells.push(null);
+    // Digit runs are empty squares; go rows can hold two-digit runs like "19".
+    for (const [, run, ch] of row.matchAll(/(\d+)|(\D)/g)) {
+      if (run) {
+        for (let i = 0; i < Number(run); i++) cells.push(null);
       } else {
         cells.push({ color: ch === ch.toUpperCase() ? "w" : "b", type: ch.toLowerCase() as PieceType });
       }

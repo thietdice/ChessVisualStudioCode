@@ -1,9 +1,13 @@
-import { Color, GEOMETRY, Grid, PieceType, Variant, rankOf, squareIndex } from "./board";
+import { Color, GEOMETRY, Grid, PieceType, Variant, isGo, isXiangqiBoard, rankOf, squareIndex } from "./board";
 
 // Vietnamese piece names; prefix t = Trắng/Red, d = Đen/Black.
 const NAME: Record<Variant, Partial<Record<PieceType, string>>> = {
   chess: { p: "Tot", n: "Ma", b: "Tuong", r: "Xe", q: "Hau", k: "Vua" },
   xiangqi: { k: "Tuong", a: "Si", b: "Voi", r: "Xe", c: "Phao", n: "Ma", p: "Tot" },
+  jieqi: { k: "Tuong", a: "Si", b: "Voi", r: "Xe", c: "Phao", n: "Ma", p: "Tot", x: "Up" },
+  go9: {},
+  go13: {},
+  go19: {},
 };
 const SIDE: Record<Color, string> = { w: "t", b: "d" };
 const EMPTY = "__";
@@ -17,6 +21,10 @@ const ROW_STEP = 2;
 // Hidden board keeps the compact hex look: "0x1C, ".
 const HIDDEN_WIDTH = 4;
 const HIDDEN_STRIDE = 6;
+// Go: a byte array, "00" empty, "01" Black, "02" White; two chars so a coloured stone looks round.
+const GO_WIDTH = 2;
+const GO_STRIDE = 4;
+const GO_CELL: Record<Color, string> = { w: "01", b: "02" };
 
 export interface RenderInput {
   variant: Variant;
@@ -51,10 +59,13 @@ export function render(input: RenderInput): Layout {
   push(filler[1]);
   lines.push("");
 
-  const width = input.hidden ? HIDDEN_WIDTH : CELL_WIDTH;
-  const stride = input.hidden ? HIDDEN_STRIDE : CELL_STRIDE;
-  const rowStep = input.hidden ? 1 : ROW_STEP;
-  const rowPrefix = (label: string) => `${ROW_INDENT}/* ${label} */ new[] { `;
+  const go = isGo(input.variant) && !input.hidden;
+  const width = input.hidden ? HIDDEN_WIDTH : go ? GO_WIDTH : CELL_WIDTH;
+  const stride = input.hidden ? HIDDEN_STRIDE : go ? GO_STRIDE : CELL_STRIDE;
+  const rowStep = input.hidden || go ? 1 : ROW_STEP;
+  // Pad rank labels so "/* 9 */" and "/* 19 */" rows line up.
+  const labelWidth = String(geo.firstRank + geo.ranks - 1).length;
+  const rowPrefix = (label: string) => `${ROW_INDENT}/* ${label.padStart(labelWidth)} */ new${go ? " byte" : ""}[] { `;
   const cellStart = rowPrefix("0").length;
   const fileIdx = [...Array(geo.files.length).keys()];
   const rowIdx = [...Array(geo.ranks).keys()];
@@ -62,22 +73,23 @@ export function render(input: RenderInput): Layout {
   const rows = input.orientation === "w" ? rowIdx : rowIdx.reverse();
   const last = files.length - 1;
 
-  const letterAt = input.hidden ? 3 : 2;
+  const letterAt = input.hidden ? 3 : go ? 1 : 2;
   let header = `${INDENT}//`.padEnd(cellStart, " ");
   for (const f of files) header += (" ".repeat(letterAt) + (input.hidden ? " " : geo.files[f])).padEnd(stride, " ");
   lines.push(header.trimEnd());
-  lines.push(`${INDENT}private static readonly ${input.hidden ? "int" : "Cell"}[][] _grid =`);
+  lines.push(`${INDENT}private static readonly ${input.hidden ? "int" : go ? "byte" : "Cell"}[][] _grid =`);
   lines.push(`${INDENT}{`);
 
   const gridTop = lines.length;
-  // Xiangqi river sits between the two halves, drawn on the spacer line.
-  const riverAfter = input.variant === "xiangqi" && !input.hidden ? geo.ranks / 2 - 1 : -1;
+  // Xiangqi / jieqi river sits between the two halves, drawn on the spacer line.
+  const riverAfter = isXiangqiBoard(input.variant) && !input.hidden ? geo.ranks / 2 - 1 : -1;
   const river = `${ROW_INDENT}// ${"~".repeat(cellStart - ROW_INDENT.length - 3 + stride * last + width - 1)}`;
   rows.forEach((r, i) => {
     if (i > 0 && rowStep > 1) lines.push(i - 1 === riverAfter ? river : "");
     const cells = files.map((f) => {
       if (input.hidden) return hex(Math.floor(rng() * 0x40));
       const p = input.grid[r]?.[f];
+      if (go) return p ? GO_CELL[p.color] : "00";
       return p ? SIDE[p.color] + (NAME[input.variant][p.type] ?? p.type) : EMPTY;
     });
     const body = cells.map((c, j) => (j < last ? (c + ",").padEnd(stride, " ") : c.padEnd(width, " "))).join("");
@@ -91,6 +103,8 @@ export function render(input: RenderInput): Layout {
     lines.push(
       `${INDENT}private enum CellKind { Pawn = 0x9, Knight = 0xA, Bishop = 0xB, Rook = 0xC, Queen = 0xE, King = 0xF }`,
     );
+  } else if (go) {
+    lines.push(`${INDENT}private enum CellState : byte { Empty = 0, Black = 1, White = 2 }`);
   } else {
     // Piece legend, disguised as an enum.
     const names = Object.values(NAME[input.variant]);

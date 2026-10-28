@@ -1,21 +1,33 @@
 import * as vscode from "vscode";
 import { Chess } from "chess.js";
 import { Chess as Xiangqi } from "@weshell/xiangqi.js";
-import { Color, GEOMETRY, START_FEN, Variant, findKing, parseFen, pieceAt, squareName } from "./board";
+import { Jieqi } from "./jieqi";
+import { Color, GEOMETRY, START_FEN, Variant, findKing, isGo, isXiangqiBoard, parseFen, pieceAt, squareName } from "./board";
 import { FILE_URI, MatrixFileSystem, SCHEME } from "./fs";
 import { ErrorMsg, Session, StateMsg } from "./net";
 import { Layout, parsePending, render } from "./render";
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+// A go point ("d4", "q16") or a pass; the server checks it fits the board.
+const GO_MOVE = /^([a-hj-t]\d{1,2}|pass)$/;
 const UCI: Record<Variant, RegExp> = {
   chess: /^[a-h][1-8][a-h][1-8][qrbn]?$/,
   xiangqi: /^[a-i][0-9][a-i][0-9]$/,
+  jieqi: /^[a-i][0-9][a-i][0-9]$/,
+  go9: GO_MOVE,
+  go13: GO_MOVE,
+  go19: GO_MOVE,
 };
 const TOKENS_KEY = "kvsync.tokens";
 const LAST_ROOM_KEY = "kvsync.lastRoom";
 const SIDE: Record<Variant, Record<Color, string>> = {
   chess: { w: "White", b: "Black" },
   xiangqi: { w: "Red", b: "Black" },
+  jieqi: { w: "Red", b: "Black" },
+  // Go: the seat that moves first ("w") plays Black.
+  go9: { w: "Black", b: "White" },
+  go13: { w: "Black", b: "White" },
+  go19: { w: "Black", b: "White" },
 };
 
 // Server error codes rendered as compiler diagnostics on the PendingBatch line.
@@ -36,6 +48,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("kvsync.mark", () => controller.mark()),
     vscode.commands.registerCommand("kvsync.toggle", () => controller.toggleHidden()),
     vscode.commands.registerCommand("kvsync.resign", () => controller.resign()),
+    vscode.commands.registerCommand("kvsync.pass", () => controller.send({ type: "move", uci: "pass" })),
     vscode.commands.registerCommand("kvsync.offerDraw", () => controller.send({ type: "draw_offer" })),
     vscode.commands.registerCommand("kvsync.acceptDraw", () => controller.send({ type: "draw_accept" })),
     vscode.commands.registerCommand("kvsync.rematch", () => controller.send({ type: "rematch_offer" })),
@@ -115,11 +128,25 @@ class Controller implements vscode.Disposable {
         [
           { label: "Batch mode: standard", description: "chess", variant: "chess" as const },
           { label: "Batch mode: extended", description: "xiangqi", variant: "xiangqi" as const },
+          { label: "Batch mode: lazy", description: "jieqi", variant: "jieqi" as const },
+          { label: "Batch mode: grid", description: "go", variant: "go19" as const },
         ],
         { placeHolder: "Kv.Core" },
       );
       if (!pick) return;
       variant = pick.variant;
+      if (isGo(variant)) {
+        const size = await vscode.window.showQuickPick(
+          [
+            { label: "Grid size: 9", variant: "go9" as const },
+            { label: "Grid size: 13", variant: "go13" as const },
+            { label: "Grid size: 19", variant: "go19" as const },
+          ],
+          { placeHolder: "Kv.Core" },
+        );
+        if (!size) return;
+        variant = size.variant;
+      }
     }
     await this.start(randomCode(), "create", undefined, variant);
   }
@@ -146,6 +173,11 @@ class Controller implements vscode.Disposable {
     if (!square) return;
 
     const piece = pieceAt(GEOMETRY[this.variant], parseFen(this.state.fen), square);
+    if (isGo(this.variant)) {
+      // Go has no from/to: one press places a stone.
+      if (!piece) this.sendMove(square);
+      return;
+    }
     const own = piece?.color === this.color;
     if (!this.selected || own) {
       // Select an own piece; pressing again on the selected one clears it.
@@ -193,6 +225,9 @@ class Controller implements vscode.Disposable {
         : []),
       ...(playing
         ? [
+            ...(isGo(this.variant)
+              ? [{ label: "$(debug-step-over) Skip batch", description: "pass", cmd: "kvsync.pass" }]
+              : []),
             { label: "$(circle-slash) Abort batch", description: "resign", cmd: "kvsync.resign" },
             offeredToMe
               ? { label: "$(git-merge) Accept merge request", description: "accept draw", cmd: "kvsync.acceptDraw" }
@@ -385,6 +420,7 @@ class Controller implements vscode.Disposable {
     const s = this.state;
     if (!s) return "";
     const side = SIDE[this.variant];
+    if (isGo(this.variant)) return this.goNote(s);
     if (s.status === "playing") return s.check ? `${side[s.turn]} in check` : "";
     if (s.status === "waiting") return "";
     const reason = (s.reason ?? s.status).replace(/_/g, " ");
@@ -392,6 +428,21 @@ class Controller implements vscode.Disposable {
     const winner = side[s.winner];
     if (s.reason === "resign") return `${side[s.winner === "w" ? "b" : "w"]} resigned - ${winner} wins`;
     return `${reason[0].toUpperCase()}${reason.slice(1)} - ${winner} wins`;
+  }
+
+  /** Go: captures while playing (and a pass just played), the final score once both passed. */
+  private goNote(s: StateMsg): string {
+    const side = SIDE[this.variant];
+    const score = s.score ?? { w: 0, b: 0 };
+    if (s.status === "scored" && s.winner) {
+      return `${side.w} ${score.w} - ${side.b} ${score.b} - ${side[s.winner]} wins`;
+    }
+    if (s.status === "resigned" && s.winner) return `${side[s.winner === "w" ? "b" : "w"]} resigned - ${side[s.winner]} wins`;
+    if (s.status === "draw") return "Draw - agreement";
+    if (s.status !== "playing") return "";
+    const c = s.captures ?? { w: 0, b: 0 };
+    const passed = s.moves.at(-1) === "pass" ? `${side[s.turn === "w" ? "b" : "w"]} passed, ` : "";
+    return `${passed}captures: ${side.w} ${c.w}, ${side.b} ${c.b}`;
   }
 
   private updateStatusBar(): void {
@@ -467,7 +518,8 @@ class Controller implements vscode.Disposable {
       const p = layout!.squarePos(sq);
       return new vscode.Range(p.line, p.ch, p.line, p.ch + p.width);
     };
-    const lastRanges = show && last ? [cell(last.slice(0, 2)), cell(last.slice(2, 4))] : [];
+    const go = isGo(this.variant);
+    const lastRanges = show && last && !go ? [cell(last.slice(0, 2)), cell(last.slice(2, 4))] : [];
     const selRanges = show && this.selected ? [cell(this.selected)] : [];
     const targetRanges = show && this.selected && this.color
       ? legalTargets(this.variant, s.fen, this.selected, this.color).map(cell)
@@ -475,23 +527,34 @@ class Controller implements vscode.Disposable {
     const darkRanges: vscode.Range[] = [];
     const whiteRanges: vscode.Range[] = [];
     const blackRanges: vscode.Range[] = [];
+    // Go stones by seat ("w" = Black stones); the last one played gets a ring.
+    const stones: Record<"w" | "b" | "wLast" | "bLast", vscode.Range[]> = { w: [], b: [], wLast: [], bLast: [] };
     if (show) {
       const geo = GEOMETRY[this.variant];
       const grid = parseFen(s.fen);
+      const stars = go ? starPoints(geo.ranks) : [];
       for (let r = 0; r < geo.ranks; r++) {
         for (let f = 0; f < geo.files.length; f++) {
           const sq = squareName(geo, f, r);
-          // Chess: checkerboard. Xiangqi: tint the two palaces instead.
-          const tinted = this.variant === "xiangqi" ? f >= 3 && f <= 5 && (r <= 2 || r >= 7) : (f + r) % 2 === 1;
-          if (tinted) darkRanges.push(cell(sq));
           const p = grid[r]?.[f];
+          if (go) {
+            if (p) stones[sq === last ? (`${p.color}Last` as const) : p.color].push(cell(sq));
+            else if (stars.includes(f) && stars.includes(r)) darkRanges.push(cell(sq));
+            continue;
+          }
+          // Chess: checkerboard. Xiangqi / jieqi: tint the two palaces instead.
+          const tinted = isXiangqiBoard(this.variant) ? f >= 3 && f <= 5 && (r <= 2 || r >= 7) : (f + r) % 2 === 1;
+          if (tinted) darkRanges.push(cell(sq));
           if (p) (p.color === "w" ? whiteRanges : blackRanges).push(cell(sq));
         }
       }
     }
     const blame: vscode.DecorationOptions[] = [];
     if (show && last) {
-      const line = layout.squarePos(last.slice(2, 4)).line;
+      // Go moves are a single point, or a pass with no square: blame the bottom row then.
+      const geo = GEOMETRY[this.variant];
+      const at = !go ? last.slice(2, 4) : last === "pass" ? squareName(geo, 0, geo.ranks - 1) : last;
+      const line = layout.squarePos(at).line;
       const mover: Color = (s.moves.length - 1) % 2 === 0 ? "w" : "b";
       const author = mover === this.color
         ? "You"
@@ -507,6 +570,10 @@ class Controller implements vscode.Disposable {
       e.setDecorations(this.boardDecos.dark, colors ? darkRanges : []);
       e.setDecorations(this.boardDecos.white, colors ? whiteRanges : []);
       e.setDecorations(this.boardDecos.black, colors ? blackRanges : []);
+      e.setDecorations(this.boardDecos.stoneBlack, colors ? stones.w : []);
+      e.setDecorations(this.boardDecos.stoneWhite, colors ? stones.b : []);
+      e.setDecorations(this.boardDecos.stoneBlackLast, colors ? stones.wLast : []);
+      e.setDecorations(this.boardDecos.stoneWhiteLast, colors ? stones.bLast : []);
       e.setDecorations(this.lastMoveDeco, lastRanges);
       e.setDecorations(this.selectedDeco, selRanges);
       e.setDecorations(this.targetDeco, targetRanges);
@@ -520,7 +587,13 @@ class Controller implements vscode.Disposable {
  * so hints also show while waiting for the opponent.
  */
 function legalTargets(variant: Variant, fen: string, square: string, color: Color): string[] {
+  if (isGo(variant)) return [];
   try {
+    if (variant === "jieqi") {
+      // The masked board is all the engine needs: face-down pieces move by their square.
+      const [rows] = fen.split(" ");
+      return [...new Set(new Jieqi(`${rows} ${color}`).moves(square).map((m) => m.slice(2, 4)))];
+    }
     const parts = fen.split(" ");
     if (parts[1] !== color) {
       parts[1] = color;
@@ -534,10 +607,21 @@ function legalTargets(variant: Variant, fen: string, square: string, color: Colo
   }
 }
 
+/** Rows/columns (0-based) of the go star points: corners and centre, plus the sides on 19x19. */
+function starPoints(size: number): number[] {
+  if (size === 19) return [3, 9, 15];
+  const edge = size < 13 ? 2 : 3;
+  return [edge, (size - 1) / 2, size - 1 - edge];
+}
+
 interface BoardDecos {
   dark: vscode.TextEditorDecorationType;
   white: vscode.TextEditorDecorationType;
   black: vscode.TextEditorDecorationType;
+  stoneBlack: vscode.TextEditorDecorationType;
+  stoneWhite: vscode.TextEditorDecorationType;
+  stoneBlackLast: vscode.TextEditorDecorationType;
+  stoneWhiteLast: vscode.TextEditorDecorationType;
 }
 
 /** Checkerboard background and piece colours, rebuilt whenever the kvsync.colors settings change. */
@@ -547,13 +631,32 @@ function createBoardDecos(): BoardDecos {
     dark: vscode.window.createTextEditorDecorationType({ backgroundColor: cfg.get<string>("darkSquare") }),
     white: vscode.window.createTextEditorDecorationType({ color: cfg.get<string>("whitePiece"), fontWeight: "bold" }),
     black: vscode.window.createTextEditorDecorationType({ color: cfg.get<string>("blackPiece"), fontWeight: "bold" }),
+    stoneBlack: stoneDeco(cfg.get<string>("blackStone")),
+    stoneWhite: stoneDeco(cfg.get<string>("whiteStone")),
+    stoneBlackLast: stoneDeco(cfg.get<string>("blackStone"), true),
+    stoneWhiteLast: stoneDeco(cfg.get<string>("whiteStone"), true),
   };
+}
+
+/** A round go stone: the "01"/"02" text is painted over in the stone colour. */
+function stoneDeco(color: string | undefined, last = false): vscode.TextEditorDecorationType {
+  return vscode.window.createTextEditorDecorationType({
+    backgroundColor: color,
+    color,
+    borderRadius: "50%",
+    border: last ? "2px solid" : "1px solid",
+    borderColor: last ? new vscode.ThemeColor("editorCursor.foreground") : "rgba(128, 128, 128, 0.7)",
+  });
 }
 
 function disposeBoardDecos(d: BoardDecos): void {
   d.dark.dispose();
   d.white.dispose();
   d.black.dispose();
+  d.stoneBlack.dispose();
+  d.stoneWhite.dispose();
+  d.stoneBlackLast.dispose();
+  d.stoneWhiteLast.dispose();
 }
 
 function randomCode(): string {
