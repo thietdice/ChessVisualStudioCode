@@ -22,12 +22,12 @@ const ROW_STEP = 2;
 const HIDDEN_WIDTH = 4;
 const HIDDEN_STRIDE = 6;
 // Go: one string per row, drawn with box-drawing chars so the lines join up like a real board
-// ("╋" star point, X Black, O White), with a "│" comment line between rows. A stone covers its
-// point plus the "─" on each side (GO_LEAD chars before it), leaving a gap to its neighbours.
-const GO_WIDTH = 3;
+// ("╋" star point, 1 Black, 0 White), with a "│" comment line between rows. Clicks on the "─"
+// either side of a point (GO_LEAD chars before it) still pick that point.
+const GO_WIDTH = 1;
 const GO_STRIDE = 4;
 const GO_LEAD = 1;
-const GO_CELL: Record<Color, string> = { w: "X", b: "O" };
+const GO_CELL: Record<Color, string> = { w: "1", b: "0" };
 
 export interface RenderInput {
   variant: Variant;
@@ -114,7 +114,7 @@ export function render(input: RenderInput): Layout {
       `${INDENT}private enum CellKind { Pawn = 0x9, Knight = 0xA, Bishop = 0xB, Rook = 0xC, Queen = 0xE, King = 0xF }`,
     );
   } else if (go) {
-    lines.push(`${INDENT}private const char Empty = '┼', Marker = '╋', Black = 'X', White = 'O';`);
+    lines.push(`${INDENT}private const char Empty = '┼', Marker = '╋', Black = '1', White = '0';`);
   } else {
     // Piece legend, disguised as an enum.
     const names = Object.values(NAME[input.variant]);
@@ -142,7 +142,7 @@ export function render(input: RenderInput): Layout {
       const { file, row } = squareIndex(geo, square);
       return {
         line: gridTop + rows.indexOf(row) * rowStep,
-        ch: cellStart + files.indexOf(file) * stride - lead,
+        ch: cellStart + files.indexOf(file) * stride,
         width,
       };
     },

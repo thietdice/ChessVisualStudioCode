@@ -2,7 +2,7 @@
   "name": "kv-batch-sync",
   "displayName": "Kv Batch Sync",
   "description": "Inventory batch synchronisation helpers.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "kv-internal",
   "private": true,
   "engines": {
@@ -123,13 +123,13 @@
         },
         "kvsync.colors.blackStone": {
           "type": "string",
-          "default": "#202020",
-          "description": "Colour of Black go stones (CSS colour)."
+          "default": "#e06c75",
+          "description": "Text colour of Black go stones, the 1s (CSS colour)."
         },
         "kvsync.colors.whiteStone": {
           "type": "string",
-          "default": "#f0f0f0",
-          "description": "Colour of White go stones (CSS colour)."
+          "default": "#e5c07b",
+          "description": "Text colour of White go stones, the 0s (CSS colour)."
         }
       }
     }

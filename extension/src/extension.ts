@@ -622,32 +622,23 @@ function createBoardDecos(): BoardDecos {
     dark: vscode.window.createTextEditorDecorationType({ backgroundColor: cfg.get<string>("darkSquare") }),
     white: vscode.window.createTextEditorDecorationType({ color: cfg.get<string>("whitePiece"), fontWeight: "bold" }),
     black: vscode.window.createTextEditorDecorationType({ color: cfg.get<string>("blackPiece"), fontWeight: "bold" }),
-    // Each stone gets a ring in the opposite tone so it reads on both light and dark themes.
-    stoneBlack: stoneDeco(cfg.get<string>("blackStone"), "rgba(220, 220, 220, 0.85)"),
-    stoneWhite: stoneDeco(cfg.get<string>("whiteStone"), "rgba(0, 0, 0, 0.55)"),
-    stoneBlackLast: stoneDeco(cfg.get<string>("blackStone"), "rgba(220, 220, 220, 0.85)", true),
-    stoneWhiteLast: stoneDeco(cfg.get<string>("whiteStone"), "rgba(0, 0, 0, 0.55)", true),
+    stoneBlack: stoneDeco(cfg.get<string>("blackStone")),
+    stoneWhite: stoneDeco(cfg.get<string>("whiteStone")),
+    stoneBlackLast: stoneDeco(cfg.get<string>("blackStone"), true),
+    stoneWhiteLast: stoneDeco(cfg.get<string>("whiteStone"), true),
   };
 }
 
-/**
- * A round go stone: the "X"/"O" point and the gap after it are painted over in the stone colour, with a highlight
- * and edge shade layered on top (VS Code passes textDecoration through as raw CSS; if it ever
- * stops, the flat background colour still shows).
- */
-function stoneDeco(color: string | undefined, ring: string, last = false): vscode.TextEditorDecorationType {
-  const shade =
-    // Sizes are fixed/closest-side: the default farthest-corner washes a whole small stone out.
-    "radial-gradient(circle 3px at 35% 30%, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0))," +
-    "radial-gradient(closest-side, rgba(0, 0, 0, 0) 65%, rgba(0, 0, 0, 0.3))";
+/** A go stone: its "1"/"0" digit in the stone colour, like syntax highlighting; the last one played gets a thin box. */
+function stoneDeco(color: string | undefined, last = false): vscode.TextEditorDecorationType {
   return vscode.window.createTextEditorDecorationType({
-    backgroundColor: color,
-    color: "transparent",
-    borderRadius: "50%",
-    border: last ? "2px solid" : "1px solid",
-    borderColor: last ? new vscode.ThemeColor("editorCursor.foreground") : ring,
-    // Vertical padding grows the 3-char-wide stone into a circle without moving any text.
-    textDecoration: `none; background-image: ${shade}; padding: 3px 0`,
+    color,
+    fontWeight: "bold",
+    ...(last && {
+      border: "1px solid",
+      borderColor: new vscode.ThemeColor("editorCursor.foreground"),
+      borderRadius: "3px",
+    }),
   });
 }
 
