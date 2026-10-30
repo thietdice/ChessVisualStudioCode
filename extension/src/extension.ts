@@ -532,14 +532,12 @@ class Controller implements vscode.Disposable {
     if (show) {
       const geo = GEOMETRY[this.variant];
       const grid = parseFen(s.fen);
-      const stars = go ? starPoints(geo.ranks) : [];
       for (let r = 0; r < geo.ranks; r++) {
         for (let f = 0; f < geo.files.length; f++) {
           const sq = squareName(geo, f, r);
           const p = grid[r]?.[f];
           if (go) {
             if (p) stones[sq === last ? (`${p.color}Last` as const) : p.color].push(cell(sq));
-            else if (stars.includes(f) && stars.includes(r)) darkRanges.push(cell(sq));
             continue;
           }
           // Chess: checkerboard. Xiangqi / jieqi: tint the two palaces instead.
@@ -607,13 +605,6 @@ function legalTargets(variant: Variant, fen: string, square: string, color: Colo
   }
 }
 
-/** Rows/columns (0-based) of the go star points: corners and centre, plus the sides on 19x19. */
-function starPoints(size: number): number[] {
-  if (size === 19) return [3, 9, 15];
-  const edge = size < 13 ? 2 : 3;
-  return [edge, (size - 1) / 2, size - 1 - edge];
-}
-
 interface BoardDecos {
   dark: vscode.TextEditorDecorationType;
   white: vscode.TextEditorDecorationType;
@@ -631,21 +622,32 @@ function createBoardDecos(): BoardDecos {
     dark: vscode.window.createTextEditorDecorationType({ backgroundColor: cfg.get<string>("darkSquare") }),
     white: vscode.window.createTextEditorDecorationType({ color: cfg.get<string>("whitePiece"), fontWeight: "bold" }),
     black: vscode.window.createTextEditorDecorationType({ color: cfg.get<string>("blackPiece"), fontWeight: "bold" }),
-    stoneBlack: stoneDeco(cfg.get<string>("blackStone")),
-    stoneWhite: stoneDeco(cfg.get<string>("whiteStone")),
-    stoneBlackLast: stoneDeco(cfg.get<string>("blackStone"), true),
-    stoneWhiteLast: stoneDeco(cfg.get<string>("whiteStone"), true),
+    // Each stone gets a ring in the opposite tone so it reads on both light and dark themes.
+    stoneBlack: stoneDeco(cfg.get<string>("blackStone"), "rgba(220, 220, 220, 0.85)"),
+    stoneWhite: stoneDeco(cfg.get<string>("whiteStone"), "rgba(0, 0, 0, 0.55)"),
+    stoneBlackLast: stoneDeco(cfg.get<string>("blackStone"), "rgba(220, 220, 220, 0.85)", true),
+    stoneWhiteLast: stoneDeco(cfg.get<string>("whiteStone"), "rgba(0, 0, 0, 0.55)", true),
   };
 }
 
-/** A round go stone: the "01"/"02" text is painted over in the stone colour. */
-function stoneDeco(color: string | undefined, last = false): vscode.TextEditorDecorationType {
+/**
+ * A round go stone: the "X"/"O" point and the gap after it are painted over in the stone colour, with a highlight
+ * and edge shade layered on top (VS Code passes textDecoration through as raw CSS; if it ever
+ * stops, the flat background colour still shows).
+ */
+function stoneDeco(color: string | undefined, ring: string, last = false): vscode.TextEditorDecorationType {
+  const shade =
+    // Sizes are fixed/closest-side: the default farthest-corner washes a whole small stone out.
+    "radial-gradient(circle 3px at 35% 30%, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0))," +
+    "radial-gradient(closest-side, rgba(0, 0, 0, 0) 65%, rgba(0, 0, 0, 0.3))";
   return vscode.window.createTextEditorDecorationType({
     backgroundColor: color,
-    color,
+    color: "transparent",
     borderRadius: "50%",
     border: last ? "2px solid" : "1px solid",
-    borderColor: last ? new vscode.ThemeColor("editorCursor.foreground") : "rgba(128, 128, 128, 0.7)",
+    borderColor: last ? new vscode.ThemeColor("editorCursor.foreground") : ring,
+    // Vertical padding grows the 3-char-wide stone into a circle without moving any text.
+    textDecoration: `none; background-image: ${shade}; padding: 3px 0`,
   });
 }
 

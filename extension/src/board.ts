@@ -46,6 +46,13 @@ export function isGo(variant: Variant): boolean {
   return variant.startsWith("go");
 }
 
+/** Rows/columns (0-based) of the go star points: corners and centre, plus the sides on 19x19. */
+export function starPoints(size: number): number[] {
+  if (size === 19) return [3, 9, 15];
+  const edge = size < 13 ? 2 : 3;
+  return [edge, (size - 1) / 2, size - 1 - edge];
+}
+
 /** Xiangqi and jieqi share the board: river, palaces, Red/Black. */
 export function isXiangqiBoard(variant: Variant): boolean {
   return variant === "xiangqi" || variant === "jieqi";

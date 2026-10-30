@@ -1,4 +1,4 @@
-import { Color, GEOMETRY, Grid, PieceType, Variant, isGo, isXiangqiBoard, rankOf, squareIndex } from "./board";
+import { Color, GEOMETRY, Grid, PieceType, Variant, isGo, isXiangqiBoard, rankOf, squareIndex, starPoints } from "./board";
 
 // Vietnamese piece names; prefix t = Trắng/Red, d = Đen/Black.
 const NAME: Record<Variant, Partial<Record<PieceType, string>>> = {
@@ -21,10 +21,13 @@ const ROW_STEP = 2;
 // Hidden board keeps the compact hex look: "0x1C, ".
 const HIDDEN_WIDTH = 4;
 const HIDDEN_STRIDE = 6;
-// Go: a byte array, "00" empty, "01" Black, "02" White; two chars so a coloured stone looks round.
-const GO_WIDTH = 2;
+// Go: one string per row, drawn with box-drawing chars so the lines join up like a real board
+// ("╋" star point, X Black, O White), with a "│" comment line between rows. A stone covers its
+// point plus the "─" on each side (GO_LEAD chars before it), leaving a gap to its neighbours.
+const GO_WIDTH = 3;
 const GO_STRIDE = 4;
-const GO_CELL: Record<Color, string> = { w: "01", b: "02" };
+const GO_LEAD = 1;
+const GO_CELL: Record<Color, string> = { w: "X", b: "O" };
 
 export interface RenderInput {
   variant: Variant;
@@ -62,10 +65,11 @@ export function render(input: RenderInput): Layout {
   const go = isGo(input.variant) && !input.hidden;
   const width = input.hidden ? HIDDEN_WIDTH : go ? GO_WIDTH : CELL_WIDTH;
   const stride = input.hidden ? HIDDEN_STRIDE : go ? GO_STRIDE : CELL_STRIDE;
-  const rowStep = input.hidden || go ? 1 : ROW_STEP;
+  const rowStep = input.hidden ? 1 : ROW_STEP;
+  const lead = go ? GO_LEAD : 0;
   // Pad rank labels so "/* 9 */" and "/* 19 */" rows line up.
   const labelWidth = String(geo.firstRank + geo.ranks - 1).length;
-  const rowPrefix = (label: string) => `${ROW_INDENT}/* ${label.padStart(labelWidth)} */ new${go ? " byte" : ""}[] { `;
+  const rowPrefix = (label: string) => `${ROW_INDENT}/* ${label.padStart(labelWidth)} */ ${go ? '"' : "new[] { "}`;
   const cellStart = rowPrefix("0").length;
   const fileIdx = [...Array(geo.files.length).keys()];
   const rowIdx = [...Array(geo.ranks).keys()];
@@ -73,27 +77,33 @@ export function render(input: RenderInput): Layout {
   const rows = input.orientation === "w" ? rowIdx : rowIdx.reverse();
   const last = files.length - 1;
 
-  const letterAt = input.hidden ? 3 : go ? 1 : 2;
+  const letterAt = input.hidden ? 3 : go ? 0 : 2;
+  const stars = go ? starPoints(geo.ranks) : [];
   let header = `${INDENT}//`.padEnd(cellStart, " ");
   for (const f of files) header += (" ".repeat(letterAt) + (input.hidden ? " " : geo.files[f])).padEnd(stride, " ");
   lines.push(header.trimEnd());
-  lines.push(`${INDENT}private static readonly ${input.hidden ? "int" : go ? "byte" : "Cell"}[][] _grid =`);
+  lines.push(`${INDENT}private static readonly ${input.hidden ? "int[]" : go ? "string" : "Cell[]"}[] _grid =`);
   lines.push(`${INDENT}{`);
 
   const gridTop = lines.length;
   // Xiangqi / jieqi river sits between the two halves, drawn on the spacer line.
   const riverAfter = isXiangqiBoard(input.variant) && !input.hidden ? geo.ranks / 2 - 1 : -1;
   const river = `${ROW_INDENT}// ${"~".repeat(cellStart - ROW_INDENT.length - 3 + stride * last + width - 1)}`;
+  const goSpacer = `${ROW_INDENT}//`.padEnd(cellStart, " ") + files.map(() => "│").join(" ".repeat(GO_STRIDE - 1));
   rows.forEach((r, i) => {
-    if (i > 0 && rowStep > 1) lines.push(i - 1 === riverAfter ? river : "");
+    if (i > 0 && rowStep > 1) lines.push(go ? goSpacer : i - 1 === riverAfter ? river : "");
     const cells = files.map((f) => {
       if (input.hidden) return hex(Math.floor(rng() * 0x40));
       const p = input.grid[r]?.[f];
-      if (go) return p ? GO_CELL[p.color] : "00";
+      if (go) return p ? GO_CELL[p.color] : goPoint(i, files.indexOf(f), rows.length - 1, last, stars.includes(f) && stars.includes(r));
       return p ? SIDE[p.color] + (NAME[input.variant][p.type] ?? p.type) : EMPTY;
     });
-    const body = cells.map((c, j) => (j < last ? (c + ",").padEnd(stride, " ") : c.padEnd(width, " "))).join("");
     const label = input.hidden ? String(i) : String(rankOf(geo, r));
+    if (go) {
+      lines.push(`${rowPrefix(label)}${cells.join("─".repeat(GO_STRIDE - 1))}",`);
+      return;
+    }
+    const body = cells.map((c, j) => (j < last ? (c + ",").padEnd(stride, " ") : c.padEnd(width, " "))).join("");
     lines.push(`${rowPrefix(label)}${body} },`);
   });
   lines.push(`${INDENT}};`);
@@ -104,7 +114,7 @@ export function render(input: RenderInput): Layout {
       `${INDENT}private enum CellKind { Pawn = 0x9, Knight = 0xA, Bishop = 0xB, Rook = 0xC, Queen = 0xE, King = 0xF }`,
     );
   } else if (go) {
-    lines.push(`${INDENT}private enum CellState : byte { Empty = 0, Black = 1, White = 2 }`);
+    lines.push(`${INDENT}private const char Empty = '┼', Marker = '╋', Black = 'X', White = 'O';`);
   } else {
     // Piece legend, disguised as an enum.
     const names = Object.values(NAME[input.variant]);
@@ -132,15 +142,15 @@ export function render(input: RenderInput): Layout {
       const { file, row } = squareIndex(geo, square);
       return {
         line: gridTop + rows.indexOf(row) * rowStep,
-        ch: cellStart + files.indexOf(file) * stride,
+        ch: cellStart + files.indexOf(file) * stride - lead,
         width,
       };
     },
     squareAt(line, ch) {
       if ((line - gridTop) % rowStep !== 0) return undefined;
       const i = (line - gridTop) / rowStep;
-      const j = Math.floor((ch - cellStart) / stride);
-      if (i < 0 || i >= rows.length || ch < cellStart || j < 0 || j > last) return undefined;
+      const j = Math.floor((ch - cellStart + lead) / stride);
+      if (i < 0 || i >= rows.length || ch < cellStart - lead || j < 0 || j > last) return undefined;
       return geo.files[files[j]] + rankOf(geo, rows[i]);
     },
   };
@@ -148,6 +158,14 @@ export function render(input: RenderInput): Layout {
 
 export function parsePending(text: string): string | undefined {
   return text.match(/PendingBatch\s*=\s*"([^"]*)"/)?.[1].trim().toLowerCase();
+}
+
+/** Empty go point at displayed row i / column j: a corner or edge piece, else a cross. */
+function goPoint(i: number, j: number, lastRow: number, lastCol: number, star: boolean): string {
+  const v = i === 0 ? 0 : i === lastRow ? 2 : 1;
+  const h = j === 0 ? 0 : j === lastCol ? 2 : 1;
+  if (v === 1 && h === 1 && star) return "╋";
+  return ["┌┬┐", "├┼┤", "└┴┘"][v][h];
 }
 
 function hex(n: number): string {
